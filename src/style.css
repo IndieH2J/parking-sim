@@ -1,0 +1,814 @@
+:root {
+  --bg: #1c1e21;
+  --panel: rgba(20, 22, 25, 0.72);
+  --line: rgba(255, 255, 255, 0.14);
+  --fg: #f2f2f7;
+  --dim: #a1a1aa;
+  --accent: #0a84ff;
+  --good: #30d158;
+  --bad: #ff453a;
+  --gap: max(10px, env(safe-area-inset-left));
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: system-ui, -apple-system, 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+#view {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh;
+  display: block;
+  touch-action: none;
+}
+
+#hud {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+}
+
+#hud > * {
+  pointer-events: auto;
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+
+button {
+  font: inherit;
+  color: var(--fg);
+  background: rgba(44, 46, 51, 0.88);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 8px 12px;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+button.ghost {
+  background: transparent;
+}
+
+#minimap {
+  position: absolute;
+  top: 10px;
+  left: var(--gap);
+  width: 200px;
+  height: 200px;
+  pointer-events: none;
+}
+
+#sensors {
+  position: absolute;
+  top: 10px;
+  right: var(--gap);
+  width: 170px;
+  height: 210px;
+  pointer-events: none;
+}
+
+#minimap[hidden],
+#sensors[hidden] {
+  display: none;
+}
+
+#topbar {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  /* left 50%라 저절로 정해지는 폭은 화면의 절반까지다: 좁은 폰(667 px)에서 상태 표시가 세로로 접히지 않게 내용 폭으로 */
+  width: max-content;
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+
+#status {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 6px 14px;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+
+#status .gears span {
+  display: inline-block;
+  width: 18px;
+  text-align: center;
+  color: var(--dim);
+  font-weight: 600;
+}
+
+#status .gears span.on {
+  color: #fff;
+  background: var(--accent);
+  border-radius: 4px;
+}
+
+#status .spd {
+  font-size: 20px;
+  font-weight: 700;
+}
+
+#status .spd small {
+  font-size: 11px;
+  margin-left: 2px;
+  color: var(--dim);
+}
+
+#status .whl {
+  color: var(--dim);
+  min-width: 56px;
+}
+
+button.icon {
+  font-size: 20px;
+  padding: 4px 12px;
+}
+
+#rearcam {
+  position: absolute;
+  top: 64px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(40vw, 520px);
+  aspect-ratio: 16 / 9;
+  border: 2px solid rgba(255, 255, 255, 0.5);
+  border-radius: 10px;
+  display: none;
+  pointer-events: none;
+}
+
+#rearcam.show {
+  display: block;
+}
+
+#rearcam span {
+  position: absolute;
+  left: 8px;
+  top: 6px;
+  font-size: 12px;
+  background: rgba(0, 0, 0, 0.5);
+  padding: 2px 6px;
+  border-radius: 6px;
+}
+
+#looks {
+  position: absolute;
+  bottom: max(10px, env(safe-area-inset-bottom));
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 6px;
+}
+
+#looks button {
+  padding: 6px 10px;
+  font-size: 13px;
+}
+
+#touch {
+  display: none;
+}
+
+#toast {
+  position: absolute;
+  top: 40%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: max-content;
+  max-width: min(80vw, 560px);
+  text-align: center;
+  padding: 10px 18px;
+  background: var(--panel);
+  border-radius: 10px;
+  opacity: 0;
+  transition: opacity 0.25s;
+  pointer-events: none;
+}
+
+#toast.show {
+  opacity: 1;
+}
+
+/* 데스크톱: 후방카메라 화면(위쪽 가운데, top 64px)이 보이는 동안에는 토스트를 그 아래로 내린다.
+   후진 중에 뜨는 steerBlocked·curbTouch가 카메라 화면 가운데(가이드라인·표시선)를 가리지 않게.
+   카메라가 없으면 v1 위치(40%) 그대로. 폰은 아래 @media (pointer: coarse) 규칙 (이 선택자가 그 규칙보다 우선하므로 범위를 나눈다). */
+@media not all and (pointer: coarse) {
+  #rearcam.show ~ #toast {
+    top: calc(64px + min(40vw, 520px) * 9 / 16 + 12px);
+    transform: translateX(-50%);
+  }
+
+  /* 한국어 토스트가 낱말 중간('바꾸/세요')에서 줄바뀌지 않게 띄어쓰기에서만 줄을 바꾼다.
+     데스크톱만: 폰 토스트는 폭이 좁아 줄 수가 늘면 후방카메라·버튼에 닿을 수 있다 */
+  #toast {
+    word-break: keep-all;
+  }
+}
+
+#overlay {
+  position: absolute;
+  inset: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.35);
+}
+
+#overlay.show {
+  display: flex;
+}
+
+#overlay .card {
+  background: #24262a;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 20px 26px;
+  min-width: 260px;
+  text-align: center;
+  /* 점수 카드가 낮은 화면(폰 가로, Safari 도구 막대)에서도 들어오게: 넘치면 카드 안에서 스크롤 (계약서 §5.4) */
+  max-height: calc(100vh - 16px);
+  max-height: calc(100dvh - 16px);
+  overflow-y: auto;
+}
+
+#overlay h2 {
+  margin: 0 0 8px;
+}
+
+#overlay h2.bad {
+  color: var(--bad);
+}
+
+#overlay h2.good {
+  color: var(--good);
+}
+
+#overlay table {
+  margin: 8px auto;
+  border-spacing: 12px 4px;
+  font-variant-numeric: tabular-nums;
+}
+
+#overlay td:first-child {
+  text-align: left;
+  color: var(--dim);
+}
+
+#overlay .dim {
+  color: var(--dim);
+  font-size: 13px;
+}
+
+#overlay .row {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  margin-top: 12px;
+}
+
+/* 점수 (v3): 총점 + 새 최고 기록 배지, 항목별 점수 (이름 · 값 · 점수/만점, 깎인 항목은 주황) */
+#overlay .total {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 4px;
+  margin: 2px 0 4px;
+}
+
+#overlay .total b {
+  font-size: 34px;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+
+#overlay .total small {
+  color: var(--dim);
+  font-size: 14px;
+}
+
+#overlay .badge {
+  align-self: center;
+  margin-left: 8px;
+  padding: 2px 8px;
+  border-radius: 8px;
+  background: #ffd60a;
+  color: #1c1e21;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+#overlay .bd {
+  display: grid;
+  grid-template-columns: auto auto auto;
+  gap: 3px 14px;
+  width: max-content;
+  margin: 8px auto 0;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+#overlay .bd > div {
+  display: contents;
+}
+
+#overlay .bd span:first-child {
+  text-align: left;
+  color: var(--dim);
+}
+
+#overlay .bd .full {
+  color: var(--dim);
+}
+
+#overlay .bd .lost {
+  color: #ff9f0a;
+}
+
+/* ---- 리플레이 (v3, 계약서 §5.4) ----
+   #replay-ui는 #hud 맨 앞이라 위쪽 버튼 줄(↺ ★ ⚙)·카드·시트 아래에 그려진다. 탑뷰 캔버스가 막대 위 공간을 채운다. */
+#hud > #replay-ui {
+  position: absolute;
+  inset: 0;
+  display: none;
+  flex-direction: column;
+  pointer-events: none;
+}
+
+body.replaying #hud > #replay-ui {
+  display: flex;
+}
+
+/* 탑뷰에서는 3D 화면을 그리지 않으므로(멈춘 화면) 막대 둘레도 배경색으로 덮는다 */
+body.replay-top #hud > #replay-ui {
+  background: var(--bg);
+}
+
+#replay-top {
+  display: none;
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  margin-bottom: 6px;
+  pointer-events: auto;
+}
+
+body.replay-top #replay-top {
+  display: block;
+}
+
+/* 아래 가장자리 한 줄, 안전 영역 안. 보이고 숨기기는 ReplayBar가 인라인 display로 한다 */
+#replay-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: auto max(10px, env(safe-area-inset-right)) max(10px, env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left));
+  padding: 6px 10px;
+  pointer-events: auto;
+}
+
+#replay-bar button {
+  min-width: 36px;
+  min-height: 36px;
+  padding: 4px 8px;
+  font-size: 14px;
+}
+
+#replay-bar button.on {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+#replay-bar .rb-scrub {
+  flex: 1 1 auto;
+  min-width: 60px;
+  height: 32px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+#replay-bar .rb-time {
+  font-size: 13px;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+#replay-bar .rb-rate,
+#replay-bar .rb-cam {
+  display: flex;
+  gap: 4px;
+}
+
+/* 리플레이 동안 운전 조작(터치 핸들·페달·기어, 시선 버튼)·후방카메라·센서를 숨긴다. 미니맵은 3D에서만 */
+body.replaying #touch,
+body.replaying #looks,
+body.replaying #rearcam,
+body.replaying #sensors,
+body.replay-top #minimap {
+  display: none;
+}
+
+/* ---- 설정·기록 시트 ---- */
+#settings-panel,
+#records-panel {
+  position: absolute;
+  inset: 0;
+  display: none;
+  justify-content: flex-end;
+  background: rgba(0, 0, 0, 0.3);
+}
+
+#settings-panel.show,
+#records-panel.show {
+  display: flex;
+}
+
+.sheet {
+  width: min(420px, 100vw);
+  height: 100%;
+  overflow-y: auto;
+  background: #222428;
+  border-left: 1px solid var(--line);
+  padding: 14px 18px 40px;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.sheet-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 18px;
+}
+
+.sheet section {
+  border-top: 1px solid var(--line);
+  margin-top: 12px;
+  padding-top: 8px;
+}
+
+.sheet h3 {
+  font-size: 14px;
+  color: var(--dim);
+  margin: 4px 0 8px;
+}
+
+.sheet .note {
+  font-size: 12px;
+  color: var(--dim);
+  line-height: 1.5;
+  margin: 4px 0 8px;
+}
+
+.chk {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 5px 0;
+}
+
+.rng {
+  display: grid;
+  grid-template-columns: 80px 1fr 58px;
+  gap: 8px;
+  align-items: center;
+  padding: 4px 0;
+}
+
+.rng output {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.seg {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 6px 0;
+}
+
+.seg button {
+  padding: 6px 10px;
+  font-size: 13px;
+}
+
+.seg button.on {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.field {
+  margin: 8px 0;
+}
+
+.field input[type='number'],
+.dims input[type='number'],
+.sheet select {
+  width: 100px;
+  padding: 6px;
+  font: inherit;
+  background: #2c2e33;
+  color: var(--fg);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.sheet select {
+  width: 100%;
+  margin: 4px 0;
+}
+
+.field .unit {
+  margin-left: 6px;
+  font-size: 12px;
+  color: var(--dim);
+}
+
+.dims h4 {
+  font-size: 13px;
+  margin: 10px 0 6px;
+}
+
+.dims .dim {
+  display: grid;
+  grid-template-columns: 1fr 100px 26px;
+  gap: 8px;
+  align-items: center;
+  padding: 3px 0;
+  font-size: 13px;
+}
+
+.dims .dim small {
+  color: var(--dim);
+}
+
+.dims input.bad {
+  border-color: var(--bad);
+}
+
+.dims .err {
+  color: var(--bad);
+  font-size: 12px;
+}
+
+.dims .err:empty {
+  display: none;
+}
+
+/* 기록 패널 (v3) */
+.rec-setup {
+  margin: 4px 0;
+  line-height: 1.5;
+}
+
+.rec-best b {
+  font-size: 22px;
+  font-variant-numeric: tabular-nums;
+}
+
+table.rec {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+table.rec th {
+  color: var(--dim);
+  font-weight: 500;
+  text-align: right;
+  vertical-align: bottom;
+  padding: 2px 4px;
+}
+
+table.rec td {
+  text-align: right;
+  white-space: nowrap;
+  padding: 4px;
+  border-top: 1px solid var(--line);
+}
+
+table.rec th:first-child,
+table.rec td:first-child {
+  text-align: left;
+}
+
+table.rec td.good {
+  color: var(--good);
+}
+
+table.rec td.bad {
+  color: var(--bad);
+}
+
+#rec-clear:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+#rotate-hint {
+  display: none;
+}
+
+/* ---- 터치 기기 ---- */
+@media (pointer: coarse) {
+  #touch {
+    display: block;
+    pointer-events: none;
+  }
+
+  #touch > * {
+    pointer-events: auto;
+  }
+
+  #wheel {
+    position: absolute;
+    left: var(--gap);
+    bottom: max(10px, env(safe-area-inset-bottom));
+    width: min(38vh, 170px);
+    height: min(38vh, 170px);
+    touch-action: none;
+  }
+
+  #wheel svg {
+    width: 100%;
+    height: 100%;
+    filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.6));
+  }
+
+  #pedals {
+    position: absolute;
+    right: max(10px, env(safe-area-inset-right));
+    bottom: max(10px, env(safe-area-inset-bottom));
+    display: flex;
+    gap: 8px;
+    align-items: flex-end;
+  }
+
+  #gearbox {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  #gearbox button {
+    width: 40px;
+    padding: 6px 0;
+    font-weight: 700;
+  }
+
+  .pedal {
+    width: 66px;
+    height: min(34vh, 140px);
+    border-radius: 14px;
+    font-size: 13px;
+    touch-action: none;
+    /* '브레이크'가 '브레이/크'로 끊기지 않게: 단어 단위 줄바꿈 + 좌우 여백을 줄여 한 줄(13 px × 4자)이 들어가게 */
+    padding: 8px 4px;
+    word-break: keep-all;
+  }
+
+  #pedal-brake {
+    background: rgba(120, 30, 30, 0.85);
+  }
+
+  #pedal-accel {
+    background: rgba(30, 90, 50, 0.85);
+    height: min(40vh, 165px);
+  }
+
+  .pedal.active {
+    filter: brightness(1.6);
+  }
+
+  #minimap {
+    width: min(30vh, 150px);
+    height: min(30vh, 150px);
+  }
+
+  #sensors {
+    width: min(26vh, 120px);
+    height: min(34vh, 150px);
+  }
+
+  #looks {
+    gap: 4px;
+  }
+
+  #looks button {
+    padding: 6px 7px;
+    font-size: 12px;
+  }
+
+  #status .spd {
+    font-size: 16px;
+  }
+
+  #rearcam {
+    top: 54px;
+    width: min(36vw, 340px);
+  }
+
+  /* 후진 중(후방카메라가 위쪽에 뜰 때) 나오는 steerBlocked·curbTouch가 카메라를 가리지 않게
+     아래쪽 시선 버튼 바로 위에 띄운다 (계약서 §3.5). 위로 자란다. */
+  #toast {
+    top: auto;
+    bottom: calc(max(10px, env(safe-area-inset-bottom)) + 44px);
+    transform: translateX(-50%);
+    /* 왼쪽 핸들과 오른쪽 기어·페달 사이. 오른쪽 열(여백 + 기어 40 + 8 + 페달 66 + 8 + 66)을 좌우 대칭으로 빼고 4 px씩 여유:
+       667 px 폰에서 토스트가 R·N 버튼을 덮었다. 844 px에서는 52vw가 더 작아 그대로 */
+    max-width: min(52vw, 440px, calc(100vw - 2 * max(10px, env(safe-area-inset-right)) - 384px));
+  }
+
+  /* 점수 카드 (계약서 §5.4): 낮은 가로 화면에 맞게 줄이고, 항목은 두 칸 격자, 버튼 줄은 넘치면 줄바꿈 */
+  #overlay .card {
+    padding: 12px 18px;
+  }
+
+  #overlay h2 {
+    font-size: 20px;
+    margin-bottom: 2px;
+  }
+
+  #overlay table {
+    margin: 2px auto;
+    border-spacing: 10px 2px;
+    font-size: 14px;
+  }
+
+  #overlay .total b {
+    font-size: 28px;
+  }
+
+  #overlay .bd {
+    grid-template-columns: repeat(2, auto auto auto);
+    gap: 2px 10px;
+    margin-top: 4px;
+    padding-top: 6px;
+    font-size: 13px;
+  }
+
+  /* 두 칸 사이를 한 칸 안보다 넓게 */
+  #overlay .bd > div:nth-child(even) span:first-child {
+    padding-left: 14px;
+  }
+
+  #overlay .row {
+    flex-wrap: wrap;
+    margin-top: 8px;
+  }
+
+  #replay-bar {
+    gap: 6px;
+    padding: 4px 8px;
+  }
+
+  #replay-bar button {
+    min-width: 34px;
+    min-height: 34px;
+    padding: 2px 6px;
+    font-size: 13px;
+  }
+
+  #replay-bar .rb-time {
+    font-size: 12px;
+  }
+}
+
+@media (pointer: coarse) and (orientation: portrait) {
+  #rotate-hint {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg);
+    font-size: 18px;
+    z-index: 10;
+  }
+}
