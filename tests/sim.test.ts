@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { MODEL_Y_2025 as SPEC } from '../src/sim/specs';
 import { buildFootprint, wheelPolys } from '../src/sim/footprint';
-import { integratePose, initialState, maxSteerAngle, updateSpeed } from '../src/sim/vehicle';
+import { integratePose, initialState, maxSteerAngle, updateSpeed, type VehicleState } from '../src/sim/vehicle';
 import { type Pose, type Vec2, toWorld } from '../src/sim/geometry';
 import { findCollision, findWheelBlock, prepare, type WorldElement } from '../src/sim/world';
 import { readSensors } from '../src/sim/sensors';
@@ -54,13 +54,95 @@ describe('차량 운동', () => {
     expect(Math.abs(maxD - 12.13) / 12.13).toBeLessThan(0.01);
   });
 
-  it('D에서 페달 없이 크리프로 서서히 전진, 브레이크를 밟으면 정지 유지', () => {
-    let s = { ...initialState(0, 0, 0), gear: 'D' as const };
-    for (let i = 0; i < 300; i++) s = { ...s, speed: updateSpeed(s, { throttle: 0, brake: 0, steer: 0 }, 1 / 60) };
-    expect(s.speed).toBeGreaterThan(0.5);
-    expect(s.speed).toBeLessThan(1.0);
-    for (let i = 0; i < 120; i++) s = { ...s, speed: updateSpeed(s, { throttle: 0, brake: 1, steer: 0 }, 1 / 60) };
-    expect(s.speed).toBe(0);
+  it('정지 상태에서 D·R에 넣고 페달 없이 5초: 속도 0, 자세 그대로', () => {
+    for (const gear of ['D', 'R'] as const) {
+      let s = { ...initialState(1, 2, 0.5), gear };
+      for (let i = 0; i < 300; i++) {
+        s = { ...s, speed: updateSpeed(s, { throttle: 0, brake: 0, steer: 0 }, 1 / 60) };
+        s = { ...s, ...integratePose(s, SPEC, s.steer, s.speed, 1 / 60) };
+        expect(s.speed, gear).toBe(0);
+      }
+      expect({ x: s.x, y: s.y, heading: s.heading }, gear).toEqual({ x: 1, y: 2, heading: 0.5 });
+    }
+  });
+
+  const HOLD = 2.0; // vehicle.ts HOLD_DECEL (m/s², 추정값). 바꾸면 여기도 바꾼다.
+
+  it('D·R에서 가속 페달을 1초 밟았다 떼면 2 m/s²로 줄어 정확히 0에서 서고 그대로 선다 (부호가 바뀌지 않음)', () => {
+    const dt = 1 / 60;
+    for (const [gear, sign] of [['D', 1], ['R', -1]] as const) {
+      let s = { ...initialState(0, 0, 0), gear };
+      for (let i = 0; i < 60; i++) s = { ...s, speed: updateSpeed(s, { throttle: 1, brake: 0, steer: 0 }, dt) };
+      const v0 = s.speed;
+      expect(v0 * sign, gear).toBeGreaterThan(1);
+      const speeds: number[] = [];
+      for (let i = 0; i < 8 * 60; i++) {
+        s = { ...s, speed: updateSpeed(s, { throttle: 0, brake: 0, steer: 0 }, dt) };
+        speeds.push(s.speed);
+      }
+      const stop = speeds.indexOf(0); // 처음 0이 된 스텝
+      expect(stop, gear).toBeGreaterThan(0);
+      // 멈출 때까지 스텝마다 HOLD·dt씩 준다 (1초에 2 m/s)
+      for (let i = 0; i < stop; i++) expect(((i === 0 ? v0 : speeds[i - 1]) - speeds[i]) * sign, gear).toBeCloseTo(HOLD * dt, 9);
+      expect((v0 - speeds[59]) * sign, gear).toBeCloseTo(HOLD, 9);
+      // 멈추는 데 걸리는 시간 = |v0| / HOLD (한 스텝 안)
+      expect(Math.abs((stop + 1) * dt - (v0 * sign) / HOLD), gear).toBeLessThan(dt);
+      // 정확히 0에서 서고, 남은 5초 넘게 그대로이며, 반대 부호로 넘어가지 않는다
+      expect(speeds[stop], gear).toBe(0);
+      expect(speeds.length - stop, gear).toBeGreaterThan(5 * 60);
+      expect(speeds.slice(stop).every((v) => v === 0), gear).toBe(true);
+      expect(speeds.every((v) => v * sign >= 0), gear).toBe(true);
+    }
+  });
+
+  it('굴러가는 방향과 반대 기어(앞으로 1 m/s에서 R, 뒤로 1 m/s에서 D)에 페달 없이: 0까지 줄어 서고 반대로 출발하지 않는다', () => {
+    const dt = 1 / 60;
+    for (const [gear, v0] of [['R', 1], ['D', -1]] as const) {
+      // 변속은 2 m/s 이하에서 허용된다 (canShift)
+      let s: VehicleState = { ...initialState(0, 0, 0), gear, speed: v0 };
+      const speeds: number[] = [];
+      for (let i = 0; i < 300; i++) {
+        s = { ...s, speed: updateSpeed(s, { throttle: 0, brake: 0, steer: 0 }, dt) };
+        speeds.push(s.speed);
+      }
+      // 기어 방향이 아니라 실제 속도의 반대로 HOLD만큼 준다: 1 m/s ÷ 2 m/s² = 0.5초 (30 스텝)
+      const stop = speeds.indexOf(0);
+      expect(stop, gear).toBeGreaterThanOrEqual(29);
+      expect(stop, gear).toBeLessThanOrEqual(30);
+      expect(speeds.slice(stop).every((v) => v === 0), gear).toBe(true);
+      expect(speeds.every((v) => v * v0 >= 0), gear).toBe(true);
+    }
+  });
+
+  it('D·R에서 가속 없이 브레이크를 밟으면 스텝마다 (6·brake + 2)·dt씩 줄어 정확히 0에서 서고 그대로 선다', () => {
+    const dt = 1 / 60;
+    for (const [gear, v0] of [['D', 1], ['R', -1]] as const) {
+      for (const brake of [0.5, 1]) {
+        let s: VehicleState = { ...initialState(0, 0, 0), gear, speed: v0 };
+        const speeds: number[] = [];
+        for (let i = 0; i < 120; i++) {
+          s = { ...s, speed: updateSpeed(s, { throttle: 0, brake, steer: 0 }, dt) };
+          speeds.push(s.speed);
+        }
+        const stop = speeds.indexOf(0);
+        expect(stop, `${gear} ${brake}`).toBeGreaterThan(0);
+        for (let i = 0; i < stop; i++)
+          expect(Math.abs(i === 0 ? v0 : speeds[i - 1]) - Math.abs(speeds[i]), `${gear} ${brake}`).toBeCloseTo((6 * brake + HOLD) * dt, 9);
+        expect(speeds.slice(stop).every((v) => v === 0), `${gear} ${brake}`).toBe(true);
+        expect(speeds.every((v) => v * v0 >= 0), `${gear} ${brake}`).toBe(true);
+      }
+    }
+  });
+
+  it('N은 페달 없이 구름저항(0.25 m/s²)으로 굴러가고, P는 0', () => {
+    for (const v0 of [1, -1]) {
+      let s: VehicleState = { ...initialState(0, 0, 0), gear: 'N', speed: v0 };
+      for (let i = 0; i < 60; i++) s = { ...s, speed: updateSpeed(s, { throttle: 0, brake: 0, steer: 0 }, 1 / 60) };
+      expect(s.speed).toBeCloseTo(0.75 * v0, 9);
+    }
+    const p: VehicleState = { ...initialState(0, 0, 0), gear: 'P', speed: 1 };
+    expect(updateSpeed(p, { throttle: 0, brake: 0, steer: 0 }, 1 / 60)).toBe(0);
+    expect(updateSpeed(p, { throttle: 1, brake: 0, steer: 0 }, 1 / 60)).toBe(0);
   });
 });
 

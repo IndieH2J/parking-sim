@@ -172,6 +172,44 @@ describe('AttemptTracker (§1.6)', () => {
   const hitCurb: MoveResult = { kind: 'wheel', wheel: 'FR', element: curb };
   const hitStop: MoveResult = { kind: 'wheel', wheel: 'RL', element: stop };
   const ok: MoveResult = { kind: 'ok' };
+  /** 앞바퀴 앞끝에서 0.5 m 앞을 가로지르는 연석 (뒤축 x가 0.5를 넘으면 닿는다) */
+  const frontCurb = () => {
+    const face = SPEC.wheelbase + SPEC.tireDiameter / 2 + 0.5;
+    return el({ kind: 'curb', poly: aabbRect(face, -2, face + 0.15, 2), hMin: 0, hMax: 0.15, dir: Math.PI / 2 });
+  };
+  /**
+   * main.ts step()의 3~5단계 순서로 모는 차 (조향 0). drive는 기어를 바꾸고 가속 페달을 throttle로 고정한 채
+   * n 스텝을 진행하고, 바퀴가 막혀 거부된 스텝 수를 돌려준다.
+   */
+  const mainLoop = (elements: WorldElement[]) => {
+    const ctx = motionCtx(SPEC, elements);
+    const t = new AttemptTracker();
+    const s = initialState(0, 0, 0);
+    const drive = (gear: 'D' | 'R', n: number, throttle = 1): number => {
+      s.gear = gear;
+      let refused = 0;
+      for (let i = 0; i < n; i++) {
+        const v = updateSpeed(s, { throttle, brake: 0, steer: 0 }, dt);
+        if (v === 0) {
+          s.speed = 0;
+          t.step(dt, 0, null);
+          continue;
+        }
+        const to = integratePose(s, SPEC, 0, v, dt);
+        const r = checkMove(ctx, s, to, 0);
+        if (r.kind === 'wheel') {
+          s.speed = 0;
+          t.step(dt, 0, r);
+          refused++;
+          continue;
+        }
+        Object.assign(s, to, { speed: v });
+        t.step(dt, v, r);
+      }
+      return refused;
+    };
+    return { t, s, drive };
+  };
 
   it('연석에 막힌 120 스텝 = 접촉 1회', () => {
     const t = new AttemptTracker();
@@ -246,36 +284,13 @@ describe('AttemptTracker (§1.6)', () => {
     expect(t.events.collisions).toBe(0);
   });
 
-  // v2 게이트: 거부 뒤 크리프가 속도 0에서 다시 붙어 연석 쪽으로 몇 mm씩 다가가는 스텝은 접촉을 끝내지 않는다.
-  it('main.ts 스텝 순서로 D 크리프 3초 동안 앞 연석을 밀어도 접촉 1회, 후진했다 다시 밀면 2회', () => {
-    const face = SPEC.wheelbase + SPEC.tireDiameter / 2 + 0.5;
-    const ctx = motionCtx(SPEC, [el({ kind: 'curb', poly: aabbRect(face, -2, face + 0.15, 2), hMin: 0, hMax: 0.15, dir: Math.PI / 2 })]);
-    const t = new AttemptTracker();
-    const s = initialState(0, 0, 0);
-    const drive = (gear: 'D' | 'R', n: number) => {
-      s.gear = gear;
-      for (let i = 0; i < n; i++) {
-        const v = updateSpeed(s, { throttle: 0, brake: 0, steer: 0 }, dt);
-        if (v === 0) {
-          s.speed = 0;
-          t.step(dt, 0, null);
-          continue;
-        }
-        const to = integratePose(s, SPEC, 0, v, dt);
-        const r = checkMove(ctx, s, to, 0);
-        if (r.kind === 'wheel') {
-          s.speed = 0;
-          t.step(dt, 0, r);
-          continue;
-        }
-        Object.assign(s, to, { speed: v });
-        t.step(dt, v, r);
-      }
-    };
+  // v2 게이트: 거부되면 속도가 0이 되고, 가속 페달을 밟고 있으면 다시 가속해 연석 쪽으로 몇 mm씩 다가간다. 그 스텝은 접촉을 끝내지 않는다.
+  it('main.ts 스텝 순서로 D에서 가속 페달을 밟은 채 3초 동안 앞 연석을 밀어도 접촉 1회, 후진했다 다시 밀면 2회', () => {
+    const { t, s, drive } = mainLoop([frontCurb()]);
     drive('D', 180);
     expect(t.events.curbTouches).toBe(1);
     expect(s.x).toBeGreaterThan(0.45); // 실제로 연석까지 갔다
-    drive('R', 60);
+    drive('R', 30); // 0.5초 후진 (약 1.1 m/s: 다시 D로 바꿀 수 있는 2 m/s 이하)
     drive('D', 180);
     expect(t.events.curbTouches).toBe(2);
   });
@@ -289,6 +304,47 @@ describe('AttemptTracker (§1.6)', () => {
     for (let i = 0; i < 40; i++) t.step(dt, 0.5, ok); // 0.33 m
     expect(t.step(dt, 0, hitCurb).newCurbTouch).toBe(true);
     expect(t.events.curbTouches).toBe(2);
+  });
+
+  it('main.ts 스텝 순서로 같은 방향으로 밟고, 떼서 서고, 다시 밟으면 전환 0회', () => {
+    for (const gear of ['D', 'R'] as const) {
+      const { t, s, drive } = mainLoop([]);
+      const sign = gear === 'D' ? 1 : -1;
+      drive(gear, 20); // 0.33초 밟기
+      expect(s.speed * sign, gear).toBeGreaterThan(0.5);
+      drive(gear, 90, 0); // 떼면 서고 그대로 선다
+      expect(s.speed, gear).toBe(0);
+      const x = s.x;
+      drive(gear, 20); // 다시 같은 방향으로
+      expect((s.x - x) * sign, gear).toBeGreaterThan(0.05);
+      expect(t.events.dirChanges, gear).toBe(0);
+    }
+  });
+
+  it('main.ts 스텝 순서로 같은 방향으로 연석을 여러 번 밀면(사이사이 페달을 떼고 정지) 매번 막혀도 접촉 1회', () => {
+    const { t, s, drive } = mainLoop([frontCurb()]);
+    expect(drive('D', 120)).toBeGreaterThan(0); // 연석까지 가서 막힘
+    for (let k = 0; k < 3; k++) {
+      drive('D', 60, 0); // 페달을 떼고 1초
+      expect(s.speed).toBe(0);
+      expect(drive('D', 30)).toBeGreaterThan(0); // 다시 밀면 또 막힌다
+    }
+    expect(t.events.curbTouches).toBe(1);
+    expect(t.events.dirChanges).toBe(0);
+    expect(s.x).toBeGreaterThan(0.45);
+    expect(s.x).toBeLessThan(0.5); // 연석을 넘지 않았다
+  });
+
+  it('main.ts 스텝 순서로 기어를 넣고 페달 없이 서 있으면 시작 전(시간 0), 시간은 처음 움직일 때부터', () => {
+    const { t, s, drive } = mainLoop([]);
+    drive('D', 120, 0);
+    drive('R', 120, 0);
+    expect(t.started).toBe(false);
+    expect(t.events).toEqual({ dirChanges: 0, elapsed: 0, curbTouches: 0, collisions: 0 });
+    expect(s).toMatchObject({ x: 0, y: 0, heading: 0, speed: 0 });
+    drive('R', 60);
+    expect(t.started).toBe(true);
+    expect(t.events.elapsed).toBeCloseTo(1.0, 9);
   });
 });
 

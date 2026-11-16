@@ -568,7 +568,7 @@ function setMode(m: Mode) {
 
 /**
  * 시뮬레이션을 멈추는 동안: 리플레이, 결과 카드, 설정·기록 시트. step을 건너뛰고 기어 입력도 받지 않는다.
- * 시트가 열린 동안 크리프로 차가 움직이고 시간이 흐르면, 기록을 보거나 설정을 바꾸는 사이에 충돌·감점이 생겼다.
+ * 시트가 열린 동안 차가 움직이고(굴러가던 차, 눌린 가속 페달) 시간이 흐르면, 기록을 보거나 설정을 바꾸는 사이에 충돌·감점이 생길 수 있다.
  */
 function simPaused(): boolean {
   return mode !== 'drive' || overlayOpen() || panel.isOpen || records.isOpen;
@@ -631,7 +631,9 @@ function step(dt: number) {
   }
 
   // 1. 페달과 조향. 바퀴를 연석·휠스톱 안으로 돌리는 조향은 거부한다.
-  throttle = approach(throttle, input.accel ? 1 : 0, input.accel ? 0.8 : 4, dt);
+  // 가속 키를 떼면 가속 값은 바로 0 (no-creep): 서서히 줄이면 뗀 뒤에도 잠깐 더 가속하고,
+  // 떼자마자 D·R로 바꾸면 남은 가속 값으로 키 없이 움직였다 (최대 약 5.5 cm)
+  throttle = input.accel ? approach(throttle, 1, 0.8, dt) : 0;
   brake = approach(brake, input.brake ? 1 : 0, input.brake ? 3 : 6, dt);
   // 데스크톱: P·N인 채 가속 키를 누르면 기어 키를 알려 준다 (첫 화면에 조작 안내가 없고, 기어 버튼은 터치 기기에만 있다)
   if (!coarse && input.accel && (state.gear === 'P' || state.gear === 'N')) {

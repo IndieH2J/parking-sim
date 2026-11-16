@@ -19,11 +19,11 @@ export interface Controls {
 }
 
 // 주차 상황용 단순 종방향 모델 파라미터 (체감용 근사값)
-const CREEP_SPEED = 0.9; // m/s ≈ 3.2 km/h, 페달 없이 기어 D/R에서 굴러가는 속도
-const CREEP_GAIN = 1.5; // 1/s
 const MAX_ACCEL = 2.5; // m/s²
 const MAX_BRAKE = 6.0; // m/s²
 const ROLL_DECEL = 0.25; // m/s²
+// 추정값. 테슬라의 'Hold' 정지 모드에 빗댄 것(가속 페달을 떼면 회생제동으로 멈추고 정지를 유지) — 실측값이 아니다.
+const HOLD_DECEL = 2.0; // m/s², 기어 D/R에서 가속 페달을 뗐을 때
 const MAX_FWD = 20 / 3.6;
 const MAX_REV = 10 / 3.6;
 const SHIFT_MAX_SPEED = 2.0; // 이 속도 이하에서만 변속 허용
@@ -59,14 +59,14 @@ export function updateSpeed(state: VehicleState, c: Controls, dt: number): numbe
   if (state.gear === 'P') return 0;
   const dir = state.gear === 'D' ? 1 : state.gear === 'R' ? -1 : 0;
   let a = 0;
+  let drag = ROLL_DECEL;
   if (dir !== 0) {
     a += dir * c.throttle * MAX_ACCEL;
-    // 크리프: 기어 방향으로 CREEP_SPEED에 수렴. 브레이크를 밟을수록 약해진다.
-    const along = v * dir;
-    if (along < CREEP_SPEED) a += dir * (CREEP_SPEED - along) * CREEP_GAIN * (1 - c.brake);
+    // 크리프 없음: 가속 페달을 밟지 않으면 출발하지 않고, 떼면 구름저항 대신 HOLD_DECEL로 멈춘 뒤 정지를 유지한다.
+    if (c.throttle === 0) drag = HOLD_DECEL;
   }
-  // 브레이크·구름저항은 진행 방향 반대로, 속도를 0 너머로 넘기지 않는다.
-  const resist = c.brake * MAX_BRAKE + ROLL_DECEL;
+  // 브레이크·구름저항(또는 HOLD_DECEL)은 기어 방향이 아니라 실제 진행 방향 반대로, 속도를 0 너머로 넘기지 않는다.
+  const resist = c.brake * MAX_BRAKE + drag;
   const vNew = v + a * dt;
   if (vNew > 0) v = Math.max(0, vNew - resist * dt);
   else if (vNew < 0) v = Math.min(0, vNew + resist * dt);
