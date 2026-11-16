@@ -131,7 +131,37 @@ export function drawTopView(ctx: CanvasRenderingContext2D, w: number, h: number,
   }
 }
 
-/** 차 위치를 중심으로 북쪽이 위인 미니맵. 축척 = 짧은 변에 18 m. 차가 없으면 목표 중심. */
+/**
+ * 주차장 전체를 보이는 카메라 (운전 중 탑뷰, 계약서 개정 2026-11-16 top-view). DOM을 쓰지 않는다.
+ * 범위 = 모든 바닥 구역·요소 다각형 + 목표 꼭짓점 + 차(차체·미러). 여유는 더하지 않는다.
+ * 리플레이 탑뷰처럼 캔버스(w × h px)에서 위쪽 insetTop px(상태 표시줄)을 뺀 영역에 맞추고 그 가운데에 둔다
+ * (북쪽이 위라 캔버스 가운데는 범위 가운데보다 insetTop/2 px만큼 북쪽).
+ */
+export function fitLot(sc: Scenario, car: TopViewLayers['car'], w: number, h: number, insetTop: number): TopViewCamera {
+  let x0 = Infinity;
+  let y0 = Infinity;
+  let x1 = -Infinity;
+  let y1 = -Infinity;
+  const grow = (pts: Vec2[]) => {
+    for (const p of pts) {
+      x0 = Math.min(x0, p.x);
+      y0 = Math.min(y0, p.y);
+      x1 = Math.max(x1, p.x);
+      y1 = Math.max(y1, p.y);
+    }
+  };
+  for (const f of sc.floor) grow(f.poly);
+  for (const el of sc.elements) grow(el.poly);
+  grow(rectCorners(sc.goal.rect));
+  if (car) for (const part of [car.fp.body, car.fp.mirrorLeft, car.fp.mirrorRight]) grow(polyToWorld(part.poly, car.pose));
+  const pxPerM = Math.min(w / (x1 - x0), Math.max(1, h - insetTop) / (y1 - y0));
+  return { cx: (x0 + x1) / 2, cy: (y0 + y1) / 2 + insetTop / 2 / pxPerM, pxPerM };
+}
+
+/**
+ * 차 위치를 중심으로 북쪽이 위인 미니맵. 축척 = 짧은 변에 18 m. 차가 없으면 목표 중심.
+ * insetTop(px)을 주면 같은 층을 주차장 전체로 그린다 (운전 중 탑뷰, fitLot).
+ */
 export class Minimap {
   private readonly ctx: CanvasRenderingContext2D;
 
@@ -139,7 +169,7 @@ export class Minimap {
     this.ctx = canvas.getContext('2d')!;
   }
 
-  draw(layers: TopViewLayers) {
+  draw(layers: TopViewLayers, insetTop?: number) {
     const c = this.canvas;
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     const w = c.clientWidth;
@@ -150,6 +180,10 @@ export class Minimap {
     }
     this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     const center = layers.car?.pose ?? { x: layers.sc.goal.rect.cx, y: layers.sc.goal.rect.cy };
-    drawTopView(this.ctx, w, h, { cx: center.x, cy: center.y, pxPerM: Math.min(w, h) / VIEW_M }, layers);
+    const cam =
+      insetTop === undefined
+        ? { cx: center.x, cy: center.y, pxPerM: Math.min(w, h) / VIEW_M }
+        : fitLot(layers.sc, layers.car, w, h, insetTop);
+    drawTopView(this.ctx, w, h, cam, layers);
   }
 }

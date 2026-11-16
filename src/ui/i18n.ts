@@ -30,7 +30,7 @@ const ko = {
   vehicle: '차량',
   controls: '조작법',
   keysHelp:
-    '↑/W 가속 · ↓/S 브레이크(Space도 가능) · ←→/A D 핸들 · C 핸들 중앙 · P R N F(=D) 기어 · 1~6 시선(좌미러/좌창/정면/우창/우미러/뒤) · 마우스 드래그로 둘러보기',
+    '↑/W 가속 · ↓/S 브레이크(Space도 가능) · ←→/A D 핸들 · C 핸들 중앙 · P R N F(=D) 기어 · 1~6 시선(좌미러/좌창/정면/우창/우미러/뒤) · T 탑뷰 · 마우스 드래그로 둘러보기',
   touchHelp: '왼쪽 핸들을 돌리고, 오른쪽 페달과 기어 버튼을 누르세요. 화면을 드래그하면 고개를 돌립니다.',
   crash: '충돌',
   crashBody: '차체',
@@ -156,6 +156,8 @@ const ko = {
   mirrorTiltNote: '후진할 때 미러를 자동으로 숙이는 차(예: 테슬라 Mirror Auto-Tilt)처럼 동작합니다. 기본은 꺼짐입니다.',
   // ---- 데스크톱 기어 안내 (계약서 Amendments 2026-11-15 v3-fix) ----
   gearHint: '기어가 P·N이면 차가 움직이지 않습니다. F(=D) 또는 R 키로 기어를 바꾸세요.',
+  // ---- 운전 중 탑뷰 (계약서 Amendments 2026-11-16 top-view) ----
+  topView: '탑뷰',
 };
 
 type Dict = typeof ko;
@@ -192,7 +194,7 @@ const en: Dict = {
   vehicle: 'Vehicle',
   controls: 'Controls',
   keysHelp:
-    '↑/W throttle · ↓/S brake (or Space) · ←→/A D steer · C center wheel · P R N F(=D) gears · 1–6 look (L mirror/L window/front/R window/R mirror/back) · drag to look around',
+    '↑/W throttle · ↓/S brake (or Space) · ←→/A D steer · C center wheel · P R N F(=D) gears · 1–6 look (L mirror/L window/front/R window/R mirror/back) · T top view · drag to look around',
   touchHelp: 'Turn the wheel on the left, use pedals and gear buttons on the right. Drag the view to turn your head.',
   crash: 'Collision',
   crashBody: 'Body',
@@ -320,6 +322,8 @@ const en: Dict = {
   mirrorTiltNote: 'Works like cars with mirror auto-tilt in reverse (for example Tesla Mirror Auto-Tilt). Off by default.',
   // ---- desktop gear hint (contract Amendments 2026-11-15 v3-fix) ----
   gearHint: 'The car does not move in P or N. Press F (= D) or R to shift.',
+  // ---- live top view (contract Amendments 2026-11-16 top-view) ----
+  topView: 'Top view',
 };
 
 const dicts: Record<Lang, Dict> = { ko, en };

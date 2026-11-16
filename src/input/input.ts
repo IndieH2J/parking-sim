@@ -5,6 +5,8 @@ export interface InputCallbacks {
   onGear: (g: Gear) => void;
   onLook: (l: LookTarget) => void;
   onLookDrag: (dx: number, dy: number) => void;
+  /** 운전 중 탑뷰 켜고 끄기 (T 키, 위쪽 탑뷰 버튼) */
+  onTopView: () => void;
   /** 터치 핸들 조작 시작 시 현재 정규화 조향값 */
   getSteer: () => number;
   /** 핸들 한쪽 최대 회전각(rad) */
@@ -42,6 +44,7 @@ export class Input {
     document.querySelectorAll<HTMLButtonElement>('[data-look]').forEach((b) => {
       this.bindPress(b, () => cb.onLook(b.dataset.look as LookTarget));
     });
+    this.bindPress(document.getElementById('btn-topview') as HTMLButtonElement, () => cb.onTopView());
     this.bindWheel();
     this.bindLookDrag();
   }
@@ -52,6 +55,7 @@ export class Input {
     if (down) {
       if (KEY_GEAR[e.code] && !e.repeat) this.cb.onGear(KEY_GEAR[e.code]);
       if (KEY_LOOK[e.code] && !e.repeat) this.cb.onLook(KEY_LOOK[e.code]);
+      if (e.code === 'KeyT' && !e.repeat) this.cb.onTopView();
       if (e.code === 'KeyC') this.centerRequested = true;
       this.keys.add(e.code);
     } else {
@@ -61,7 +65,7 @@ export class Input {
   }
 
   /**
-   * 기어·시선 버튼은 누르는 순간(pointerdown) 실행한다. 다른 손가락으로 페달이나 핸들을 누르고 있으면 그 탭은 주 포인터가 아니라
+   * 기어·시선·탑뷰 버튼은 누르는 순간(pointerdown) 실행한다. 다른 손가락으로 페달이나 핸들을 누르고 있으면 그 탭은 주 포인터가 아니라
    * 브라우저가 click을 만들지 않는다 (click만 들으면 브레이크를 밟은 채 R을 눌러도 무시됐다).
    * 키보드(Enter·Space)로 생긴 click(detail 0)은 그대로 받고, 포인터가 만든 click(detail ≥ 1)은 pointerdown에서 이미 처리했으므로 무시한다.
    */

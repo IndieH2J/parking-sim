@@ -70,7 +70,7 @@ const DT = 1 / 60;
 const KEY_STEER_RATE = 0.9; // 정규화 조향/초 (중앙→끝 약 1.1초)
 const STEER_TOAST_MS = 2000; // steerBlocked 안내는 2초에 한 번까지
 const HINT_MS = 4000; // 시나리오 안내는 두 줄이라 기본 1.8초로는 짧다
-const TOPBAR_GAP = 6; // 탑뷰 리플레이에서 위쪽 상태 표시줄 아래 여백 (px)
+const TOPBAR_GAP = 6; // 탑뷰(리플레이·운전 중)에서 위쪽 상태 표시줄 아래 여백 (px)
 const coarse = matchMedia('(pointer: coarse)').matches;
 
 const settings = loadSettings();
@@ -264,6 +264,9 @@ function applyAids() {
   minimapEl.hidden = !a.minimap;
   sensorsEl.hidden = !a.distance;
   for (const m of Object.values(mirrors)) m.setEnabled(a.mirrors);
+  // 운전 중 탑뷰는 미니맵 보조가 켜져 있을 때만 쓴다 (감각 모드는 미니맵을 끈다): 꺼지면 운전석 화면으로 돌아간다
+  if (!a.minimap) topViewOn = false;
+  syncTopView();
 }
 
 /** 고스트만 다시 만든다 ('ghost' 변경). 감각 모드는 고스트를 건드리지 않는다. */
@@ -482,16 +485,26 @@ function requestGear(g: Gear) {
   }
 }
 
-/** 운전석 카메라가 화면에 보이는지. 탑뷰·추적 카메라 리플레이에서 시선을 바꾸면 운전 모드로 돌아온 뒤에야 드러나므로 받지 않는다. */
-const driverShown = () => mode === 'drive' || (mode === 'replay3d' && replayCam === 'driver');
+/**
+ * 운전석 카메라가 화면에 보이는지. 운전 중 탑뷰, 탑뷰·추적 카메라 리플레이에서 시선을 바꾸면 운전석 화면으로 돌아온 뒤에야
+ * 드러나므로 받지 않는다 (운전 중 탑뷰를 켜기 전에 시작한 드래그도 #view가 포인터를 잡고 있어 여기로 온다).
+ */
+const driverShown = () => (mode === 'drive' && !topViewShown()) || (mode === 'replay3d' && replayCam === 'driver');
 
 const inputCallbacks: InputCallbacks = {
   onGear: requestGear,
   onLook: (l) => {
+    // 운전 중 탑뷰에서 시선 키를 누르면 운전석 화면으로 돌아가 그 시선을 본다
+    if (topViewShown()) setTopView(false);
     if (driverShown()) driver.look(l);
   },
   onLookDrag: (dx, dy) => {
     if (driverShown()) driver.drag(dx, dy);
+  },
+  onTopView: () => {
+    // 리플레이·결과 카드·설정·기록 시트 중에는 바꾸지 않는다. 미니맵 보조가 꺼져 있으면(감각 모드) 쓸 수 없다
+    if (simPaused() || !settings.aids.minimap) return;
+    setTopView(!topViewOn);
   },
   getSteer: () => state.steer,
   maxWheel,
@@ -564,6 +577,7 @@ function setMode(m: Mode) {
   // 리플레이 동안 터치 조작·시선 버튼·후방카메라·센서를 숨기고, 탑뷰에서는 미니맵도 숨긴다 (style.css)
   document.body.classList.toggle('replaying', m !== 'drive');
   document.body.classList.toggle('replay-top', m === 'replayTop');
+  syncTopView(); // 운전 중 탑뷰는 리플레이 동안 그리지 않고, 운전 모드로 돌아오면 다시 보인다
 }
 
 /**
@@ -612,6 +626,32 @@ function leaveReplay() {
 function closeReplay() {
   leaveReplay();
   scoredCard?.();
+}
+
+// ---- 운전 중 탑뷰 (계약서 개정 2026-11-16 top-view): 주차장 전체 2D 지도. 이 세션에만 두고 설정에 저장하지 않는다 ----
+/** 탑뷰를 골랐는지. 리플레이 동안에도 남아 운전 모드로 돌아오면 다시 보이고, 다시 시작(↺)해도 그대로다 */
+let topViewOn = false;
+const topViewCanvas = document.getElementById('topview') as HTMLCanvasElement;
+const topViewBtn = document.getElementById('btn-topview')!;
+const lotMap = new Minimap(topViewCanvas);
+
+/** 지금 탑뷰를 그리는지 (미니맵 보조가 꺼지면 applyAids가 topViewOn을 지운다) */
+function topViewShown(): boolean {
+  return mode === 'drive' && topViewOn;
+}
+
+/** body 클래스(style.css)와 탑뷰 버튼을 지금 상태에 맞춘다. 버튼은 미니맵 보조가 꺼져 있거나(감각 모드) 리플레이 중이면 숨긴다 */
+function syncTopView() {
+  const on = topViewShown();
+  document.body.classList.toggle('topview', on);
+  topViewBtn.hidden = !settings.aids.minimap || mode !== 'drive';
+  topViewBtn.classList.toggle('on', on);
+  topViewBtn.setAttribute('aria-pressed', String(on));
+}
+
+function setTopView(on: boolean) {
+  topViewOn = on;
+  syncTopView();
 }
 
 const approach = (v: number, target: number, rate: number, dt: number) =>
@@ -769,12 +809,14 @@ function frameLoop(now: number) {
 
   const a = settings.aids;
   const ghostLayer = ghostFp && ghostNow ? { fp: ghostFp, pose: ghostNow } : null;
+  const topShown = topViewShown();
   if (mode === 'replayTop') {
     // 탑뷰 리플레이: 위쪽 캔버스가 3D 화면을 덮으므로 3D는 그리지 않는다.
     // 위쪽 상태 표시줄이 캔버스 위에 떠 있으므로 그 아래 영역에 맞춘다 (폰에서 램프 출구가 상태 표시 밑에 들어갔다)
     const inset = topbarEl.getBoundingClientRect().bottom - topCanvas.getBoundingClientRect().top + TOPBAR_GAP;
     topView.draw(sc, fp, recorder.frames, playback.t, ghostLayer, inset);
-  } else {
+  } else if (!topShown) {
+    // (운전 중 탑뷰는 지도가 화면을 덮으므로 3D 화면과 미러를 그리지 않는다. 지도는 아래 미니맵 자리에서 그린다)
     const chaseView = mode === 'replay3d' && replayCam === 'chase';
     // 미러는 운전석 카메라로 그릴 때만
     if (!chaseView && a.mirrors && (!coarse || frame % 2 === 0)) {
@@ -799,7 +841,8 @@ function frameLoop(now: number) {
   }
 
   // 미러 확대 시선(좌/우 미러)에서는 후방카메라 화면을 숨긴다: 화면 가운데 위쪽에 떠서 확대한 미러를 가린다. 리플레이에서도 숨긴다.
-  const showRear = mode === 'drive' && a.rearCam && state.gear === 'R' && !driver.mirrorLook;
+  // 운전 중 탑뷰에서도 숨긴다: 후방카메라는 지도가 덮은 3D 캔버스에 그린다.
+  const showRear = mode === 'drive' && !topShown && a.rearCam && state.gear === 'R' && !driver.mirrorLook;
   rearcamEl.classList.toggle('show', showRear);
   if (showRear) {
     guides.group.visible = a.guides;
@@ -808,15 +851,18 @@ function frameLoop(now: number) {
     rearView.render(renderer, scene, r.left, h - r.bottom, r.width, r.height);
   }
 
-  // 미니맵: 3D 리플레이에서는 재생 위치를 보이고, 탑뷰 리플레이에서는 숨긴다
+  // 미니맵: 3D 리플레이에서는 재생 위치를 보이고, 탑뷰 리플레이에서는 숨긴다.
+  // 운전 중 탑뷰는 같은 층을 주차장 전체로, 상태 표시줄 아래 영역에 맞춰 그린다 (미니맵은 숨는다)
   if (a.minimap && mode !== 'replayTop') {
     const moving = mode === 'drive' && (state.gear === 'D' || state.gear === 'R');
-    minimap.draw({
+    const layers = {
       sc,
       car: { fp, pose: view },
       path: a.guides && moving ? predictPath(state, spec, state.gear === 'R' ? -1 : 1) : null,
       ghost: ghostLayer,
-    });
+    };
+    if (topShown) lotMap.draw(layers, topbarEl.getBoundingClientRect().bottom - topViewCanvas.getBoundingClientRect().top + TOPBAR_GAP);
+    else minimap.draw(layers);
   }
   if (a.distance && mode === 'drive' && frame % 3 === 0) drawSensors(sensorsEl, readSensors(fp, state, sc.elements));
   if (frame % 4 === 0) updateStatus(statusEl, view.gear, view.speed, (view.steer * maxWheel * 180) / Math.PI);
@@ -896,6 +942,8 @@ const sim = {
   },
   shift: (g: Gear) => requestGear(g),
   look: (l: LookTarget) => driver.look(l),
+  /** 운전 중 탑뷰가 지금 보이는지 (읽기 전용, 계약서 개정 2026-11-16 top-view) */
+  topView: () => topViewShown(),
   evaluate: (): GoalEval => evaluateGoal(sc.goal, fp, state),
   /** 마지막 운전석 화면의 드로우콜 수 */
   drawCalls: () => lastDrawCalls,
