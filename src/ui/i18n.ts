@@ -247,7 +247,7 @@ const en: Dict = {
   sideFront: 'front',
   sideBack: 'rear',
   curbTouch: 'A wheel touched the curb',
-  steerBlocked: 'The tyre would hit the curb or wheel stop. Creep a little while steering.',
+  steerBlocked: 'The tyre would hit the curb or wheel stop. Move a little while steering.',
   curbGap: 'To curb',
   rampDone: 'Exit reached',
   elapsed: 'Time',
