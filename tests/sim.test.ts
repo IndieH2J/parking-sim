@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { MODEL_Y_2025 as SPEC } from '../src/sim/specs';
 import { buildFootprint, wheelPolys } from '../src/sim/footprint';
-import { integratePose, initialState, maxSteerAngle, updateSpeed, type VehicleState } from '../src/sim/vehicle';
+import { canShift, integratePose, initialState, MAX_SPEED, maxSteerAngle, updateSpeed, type VehicleState } from '../src/sim/vehicle';
 import { type Pose, type Vec2, toWorld } from '../src/sim/geometry';
 import { findCollision, findWheelBlock, prepare, type WorldElement } from '../src/sim/world';
 import { readSensors } from '../src/sim/sensors';
@@ -74,7 +74,7 @@ describe('차량 운동', () => {
       let s = { ...initialState(0, 0, 0), gear };
       for (let i = 0; i < 60; i++) s = { ...s, speed: updateSpeed(s, { throttle: 1, brake: 0, steer: 0 }, dt) };
       const v0 = s.speed;
-      expect(v0 * sign, gear).toBeGreaterThan(1);
+      expect(v0 * sign, gear).toBe(MAX_SPEED); // 1초면 상한(5 km/h)에 이른다
       const speeds: number[] = [];
       for (let i = 0; i < 8 * 60; i++) {
         s = { ...s, speed: updateSpeed(s, { throttle: 0, brake: 0, steer: 0 }, dt) };
@@ -82,9 +82,9 @@ describe('차량 운동', () => {
       }
       const stop = speeds.indexOf(0); // 처음 0이 된 스텝
       expect(stop, gear).toBeGreaterThan(0);
-      // 멈출 때까지 스텝마다 HOLD·dt씩 준다 (1초에 2 m/s)
+      // 멈출 때까지 스텝마다 HOLD·dt씩 준다 (0.5초에 1 m/s. 상한에서는 약 0.69초 만에 선다)
       for (let i = 0; i < stop; i++) expect(((i === 0 ? v0 : speeds[i - 1]) - speeds[i]) * sign, gear).toBeCloseTo(HOLD * dt, 9);
-      expect((v0 - speeds[59]) * sign, gear).toBeCloseTo(HOLD, 9);
+      expect((v0 - speeds[29]) * sign, gear).toBeCloseTo(HOLD / 2, 9);
       // 멈추는 데 걸리는 시간 = |v0| / HOLD (한 스텝 안)
       expect(Math.abs((stop + 1) * dt - (v0 * sign) / HOLD), gear).toBeLessThan(dt);
       // 정확히 0에서 서고, 남은 5초 넘게 그대로이며, 반대 부호로 넘어가지 않는다
@@ -143,6 +143,29 @@ describe('차량 운동', () => {
     const p: VehicleState = { ...initialState(0, 0, 0), gear: 'P', speed: 1 };
     expect(updateSpeed(p, { throttle: 0, brake: 0, steer: 0 }, 1 / 60)).toBe(0);
     expect(updateSpeed(p, { throttle: 1, brake: 0, steer: 0 }, 1 / 60)).toBe(0);
+  });
+});
+
+describe('속도 상한 (D8)', () => {
+  it('MAX_SPEED = 5 km/h', () => {
+    expect(MAX_SPEED).toBe(5 / 3.6);
+  });
+
+  it('D·R에서 가속 페달을 3초 끝까지 밟으면 정확히 상한에 이르고 넘지 않는다 (R은 −MAX_SPEED)', () => {
+    const dt = 1 / 60;
+    for (const [gear, sign] of [['D', 1], ['R', -1]] as const) {
+      let s: VehicleState = { ...initialState(0, 0, 0), gear };
+      for (let i = 0; i < 3 * 60; i++) {
+        s = { ...s, speed: updateSpeed(s, { throttle: 1, brake: 0, steer: 0 }, dt) };
+        expect(s.speed * sign, `${gear} ${i}`).toBeLessThanOrEqual(MAX_SPEED);
+      }
+      expect(s.speed, gear).toBe(sign * MAX_SPEED);
+    }
+  });
+
+  it('상한 속도(±MAX_SPEED)에서도 변속할 수 있다 (상한 < 2 m/s라 canShift가 거부하지 않는다)', () => {
+    expect(canShift({ ...initialState(0, 0, 0), gear: 'D', speed: MAX_SPEED })).toBe(true);
+    expect(canShift({ ...initialState(0, 0, 0), gear: 'R', speed: -MAX_SPEED })).toBe(true);
   });
 });
 

@@ -6,12 +6,14 @@ import { buildFootprint, wheelPolys } from '../src/sim/footprint';
 import { pointInConvex, type Vec2 } from '../src/sim/geometry';
 import { evaluateGoal } from '../src/sim/goal';
 import { motionCtx, poseClear, type MoveResult } from '../src/sim/motion';
+import { SCORE_PAR } from '../src/sim/score';
 import { readSensors } from '../src/sim/sensors';
 import { MODEL_Y_2025, type VehicleSpec } from '../src/sim/specs';
 import { integratePose } from '../src/sim/vehicle';
 import { CUSTOM_ID, DEFAULT_CUSTOM_DIMS, getSpec, listVehicles, type CustomDims } from '../src/sim/vehicles';
 import type { WorldElement } from '../src/sim/world';
 import { allSpecs, dirChanges, DS, move, setSteer, startDrive, type Drive } from './helpers/drive';
+import { legTime } from './helpers/timing';
 
 // 좁은 통로·곡선 램프 (계약서 §1.8.4, §8.2). 빌더를 직접 import한다 (§A.5).
 
@@ -520,5 +522,28 @@ describe('해결 가능성: 출발에서 출구 구역까지 전진만 (§8.2)',
       expect(rampLaneWidths(widened, Ri).curve).toBeGreaterThan(3.6);
       for (const sp of [noHold, held, legal, widened]) expectDrive(sp, Ri);
     });
+  }
+});
+
+// ---------------------------------------------------------------- 시간 기준 (D8 속도 상한 5 km/h)
+
+describe('시간 기준: 램프 tGood ≥ 1.5 × 상한 속도로 걸리는 최소 시간 (D8)', () => {
+  // T = 해결 가능성 주행의 뒤축 경로 길이를 가속 키를 끝까지 누른 채 가는 시간 (출구 구역은 움직이는 채로 성공한다).
+  // 속도 상한이나 램프 길이가 바뀌어 실패하면 SCORE_PAR.ramp를 다시 맞춘다.
+  const cars: [string, VehicleSpec][] = [
+    ['모델 Y', MODEL_Y_2025],
+    ['직접 입력 최대급 차', OVERSIZED],
+  ];
+  for (const [name, spec] of cars) {
+    for (const Ri of RAMP_RADIUS_OPTIONS) {
+      it(`${name} 반경 ${Ri} m`, () => {
+        const run = driveRamp(spec, Ri);
+        expect(run.success, run.error).toBe(true);
+        const L = run.d.segments.reduce((s, x) => s + Math.abs(x.dist), 0);
+        const T = legTime(L, true);
+        console.log(`[ramp-time] ${spec.id} R${Ri}: L ${L.toFixed(2)} m, T ${T.toFixed(2)} s, tGood/T ${(SCORE_PAR.ramp.tGood / T).toFixed(2)}`);
+        expect(SCORE_PAR.ramp.tGood).toBeGreaterThanOrEqual(1.5 * T);
+      });
+    }
   }
 });

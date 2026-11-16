@@ -24,8 +24,8 @@ const MAX_BRAKE = 6.0; // m/s²
 const ROLL_DECEL = 0.25; // m/s²
 // 추정값. 테슬라의 'Hold' 정지 모드에 빗댄 것(가속 페달을 떼면 회생제동으로 멈추고 정지를 유지) — 실측값이 아니다.
 const HOLD_DECEL = 2.0; // m/s², 기어 D/R에서 가속 페달을 뗐을 때
-const MAX_FWD = 20 / 3.6;
-const MAX_REV = 10 / 3.6;
+export const MAX_SPEED = 5 / 3.6; // 주차 속도 상한 (D8), 전진·후진 같음
+// MAX_SPEED가 2 m/s보다 낮아 지금은 변속 거부(canShift false)가 일어나지 않는다. 상한을 다시 올릴 때를 위해 일부러 남겨 둔다 (D8).
 const SHIFT_MAX_SPEED = 2.0; // 이 속도 이하에서만 변속 허용
 
 /**
@@ -71,7 +71,7 @@ export function updateSpeed(state: VehicleState, c: Controls, dt: number): numbe
   if (vNew > 0) v = Math.max(0, vNew - resist * dt);
   else if (vNew < 0) v = Math.min(0, vNew + resist * dt);
   else v = 0;
-  return Math.max(-MAX_REV, Math.min(MAX_FWD, v));
+  return Math.max(-MAX_SPEED, Math.min(MAX_SPEED, v));
 }
 
 /** 자전거 모델의 정확한 원호 적분으로 위치를 이동한 새 상태를 돌려준다. */

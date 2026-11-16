@@ -73,7 +73,7 @@ describe('SCORE_PAR', () => {
       rearPerp: { moves: 1, tGood: 35, tBad: 120 },
       frontPerp: { moves: 1, tGood: 30, tBad: 120 },
       parallel: { moves: 2, tGood: 40, tBad: 150 },
-      ramp: { moves: 0, tGood: 60, tBad: 180 },
+      ramp: { moves: 0, tGood: 80, tBad: 200 },
     });
   });
 
@@ -236,17 +236,17 @@ describe('scoreAttempt: 램프 (zone)', () => {
     expect(r.total).toBe(100);
   });
 
-  it('경계: 연석 4회, 기준 초과 전환 3회, 180초에서 0점', () => {
+  it('경계: 연석 4회, 기준 초과 전환 3회, 200초에서 0점 (시간은 80초 이하 만점)', () => {
     const e = (o: Partial<AttemptEvents>) => score('ramp', { events: o });
     expect(pts(e({ curbTouches: 2 }), 'curb')).toBe(20);
     expect(pts(e({ curbTouches: 4 }), 'curb')).toBe(0);
     expect(pts(e({ curbTouches: 7 }), 'curb')).toBe(0);
     expect(pts(e({ dirChanges: 1 }), 'moves')).toBe(20);
     expect(pts(e({ dirChanges: 3 }), 'moves')).toBe(0);
-    expect(pts(e({ elapsed: 60 }), 'time')).toBe(30);
-    expect(pts(e({ elapsed: 120 }), 'time')).toBe(15);
-    expect(pts(e({ elapsed: 180 }), 'time')).toBe(0);
-    expect(e({ curbTouches: 4, dirChanges: 3, elapsed: 180 }).total).toBe(0);
+    expect(pts(e({ elapsed: 80 }), 'time')).toBe(30);
+    expect(pts(e({ elapsed: 140 }), 'time')).toBe(15);
+    expect(pts(e({ elapsed: 200 }), 'time')).toBe(0);
+    expect(e({ curbTouches: 4, dirChanges: 3, elapsed: 200 }).total).toBe(0);
   });
 });
 
