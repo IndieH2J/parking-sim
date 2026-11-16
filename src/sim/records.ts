@@ -34,18 +34,29 @@ export interface RecordsFile {
 export const RECORDS_KEY = 'parking-sim.records.v1';
 export const MAX_RECENT = 10;
 
-/** 조건 키. vehicleKey는 src/sim/vehicles.ts의 vehicleKey() 결과. */
+/**
+ * 조건 키. vehicleKey는 src/sim/vehicles.ts의 vehicleKey() 결과.
+ * 예전 4종의 키 문자열은 그대로다 (crooked가 꺼져 있으면 '|crooked'가 붙지 않는다, 계약서 개정 2026-11-16 situations).
+ */
 export function recordKey(kind: ScenarioKind, opts: AnyScenarioOptions, vehicleKey: string): string {
   switch (kind) {
     case 'rearPerp':
-    case 'frontPerp': {
+    case 'frontPerp':
+    case 'rearPerpOut':
+    case 'frontPerpOut': {
       const o = opts as PerpOptions;
-      return `${kind}|w${o.slotWidth.toFixed(2)}|${o.target}|${vehicleKey}`;
+      return `${kind}|w${o.slotWidth.toFixed(2)}|${o.target}${o.crooked ? '|crooked' : ''}|${vehicleKey}`;
     }
     case 'parallel':
-      return `parallel|L${(opts as ParallelOptions).slotLength.toFixed(2)}|${vehicleKey}`;
+    case 'parallelOut':
+      return `${kind}|L${(opts as ParallelOptions).slotLength.toFixed(2)}|${vehicleKey}`;
     case 'ramp':
       return `ramp|r${(opts as RampOptions).innerRadius}|${vehicleKey}`;
+    // 옵션이 없는 코스: 차만
+    case 'alley':
+    case 'uturn':
+    case 'kiosk':
+      return `${kind}|${vehicleKey}`;
   }
 }
 

@@ -5,13 +5,13 @@ import { wheelPolys } from './footprint';
 import type { VehicleSpec } from './specs';
 
 /**
- * solid     : 벽·기둥·주차 차량. 높이 범위가 겹치면 충돌
+ * solid     : 벽·기둥·주차 차량·전봇대·발권기·차단기. 높이 범위가 겹치면 충돌
  * wheelStop : 휠스톱. 바퀴만 막는다 (차체 오버행은 위로 지나감)
  * curb      : 연석. 바퀴만 막는다
  * line      : 주차선. 충돌 없음, 거리 측정·판정용
  */
 export type ElementKind = 'solid' | 'wheelStop' | 'curb' | 'line';
-export type SolidTag = 'wall' | 'pillar' | 'car';
+export type SolidTag = 'wall' | 'pillar' | 'car' | 'pole' | 'kiosk' | 'barrier';
 
 export interface WorldElement {
   id: string;

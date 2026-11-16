@@ -108,3 +108,17 @@ export function isConvex(poly: Vec2[]): boolean {
   // 같은 방향으로만 꺾여도 별 모양처럼 두 바퀴 도는 경우를 걸러낸다
   return sign !== 0 && Math.abs(Math.abs(turn) - 2 * Math.PI) < 1e-6;
 }
+
+// ---- 상황 추가 (계약서 개정 2026-11-16 situations, 설계 .dev/v4-design.md C0). 위 함수들은 그대로 두고 덧붙이기만 한다 ----
+
+/**
+ * 정팔각형 (반시계, 볼록). r = 중심에서 각 변까지 거리라 같은 지름의 원을 감싼다:
+ * x·y축에 수직인 변이 x = cx ± r, y = cy ± r에 놓이고, 꼭짓점은 중심에서 r / cos(π/8).
+ */
+export function octagon(cx: number, cy: number, r: number): Vec2[] {
+  const R = r / Math.cos(Math.PI / 8);
+  return Array.from({ length: 8 }, (_, i) => {
+    const a = Math.PI / 8 + (i * Math.PI) / 4;
+    return { x: cx + R * Math.cos(a), y: cy + R * Math.sin(a) };
+  });
+}

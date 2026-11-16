@@ -4,7 +4,7 @@ import { CUSTOM_ID } from '../sim/vehicles';
 import { secText } from './hud';
 import { getLang, t } from './i18n';
 import type { Settings } from './settings';
-import { SC_LABEL } from './settingsPanel';
+import { SC_LABEL } from './situationPanel';
 
 // 기록 패널 (계약서 §5.4): 위쪽 ★ 버튼으로 연다. 지금 설정(주차 유형 + 옵션 + 차)의 최고 기록과 최근 기록.
 // 저장소는 main.ts가 다룬다 (RecordsSource).
@@ -25,13 +25,23 @@ export function setupLabel(s: Settings, spec: VehicleSpec): string {
   switch (s.scenario) {
     case 'rearPerp':
     case 'frontPerp':
+    case 'rearPerpOut':
+    case 'frontPerpOut':
       parts.push(`${t('slotWidth')} ${m(s.perp.slotWidth)}`, t(s.perp.target === 'between' ? 'targetBetween' : 'targetPillar'));
+      // 옆 차 비뚤게: 기록 키처럼 켰을 때만 붙인다 (계약서 개정 2026-11-16 situations)
+      if (s.perp.crooked) parts.push(t('crooked'));
       break;
     case 'parallel':
+    case 'parallelOut':
       parts.push(`${t('slotLength')} ${m(s.parallel.slotLength)}`);
       break;
     case 'ramp':
       parts.push(`${t('rampRadius')} ${m(s.ramp.innerRadius)}`);
+      break;
+    // 골목·유턴·발권기는 옵션이 없다 (기록 키도 상황과 차뿐)
+    case 'alley':
+    case 'uturn':
+    case 'kiosk':
       break;
   }
   const name = spec.name[getLang()];

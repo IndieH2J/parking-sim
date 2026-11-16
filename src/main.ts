@@ -16,7 +16,7 @@ import {
   type VehicleState,
 } from './sim/vehicle';
 import { autoShift } from './sim/autoShift';
-import type { Collision } from './sim/world';
+import type { Collision, SolidTag } from './sim/world';
 import { readSensors } from './sim/sensors';
 import { eyeLocal } from './sim/driver';
 import { evaluateGoal, type GoalEval } from './sim/goal';
@@ -24,7 +24,9 @@ import { canSteer, checkMove, motionCtx } from './sim/motion';
 import { AttemptTracker } from './sim/attempt';
 import { getSpec, validateCustomDims, vehicleKey, type CustomDims, type GhostAlign } from './sim/vehicles';
 import { ghostPose } from './sim/ghost';
-import { doorClearances, scoreAttempt } from './sim/score';
+import { doorClearances, FAMILY, scoreAttempt } from './sim/score';
+import { clearance } from './sim/clearance';
+import { KIOSK_ALONG_MAX, KIOSK_ANGLE_MAX, KIOSK_REACH_MAX, kioskEval, type KioskEval } from './sim/kioskJudge';
 import {
   addAttempt,
   clearEntry,
@@ -38,6 +40,7 @@ import {
 } from './sim/records';
 import { cumulativeDistance, distanceAt, frameAt, Playback, Recorder } from './sim/replay';
 import { buildScenario } from './scenarios/index';
+import { kioskTargetPose } from './scenarios/kiosk';
 import type { ParallelOptions, PerpOptions, RampOptions, Scenario, ScenarioKind } from './scenarios/types';
 import { addLights, buildStatic, CHASE_HIDDEN } from './render/scene';
 import { buildCar, type CarRig } from './render/carMesh';
@@ -53,6 +56,7 @@ import { Input, type InputCallbacks } from './input/input';
 import { detectLang, setLang, t, type Key } from './ui/i18n';
 import { loadSettings, optionsFor, sanitizeSettings, saveSettings } from './ui/settings';
 import { SettingsPanel } from './ui/settingsPanel';
+import { SituationPanel } from './ui/situationPanel';
 import {
   cmText,
   drawSensors,
@@ -95,10 +99,15 @@ function makeScenario(): Scenario {
   const o = optionsFor(settings);
   return buildScenario(o.kind, o.opts, spec);
 }
+/** 배경: 야외(골목·유턴)는 하늘색, 실내는 어두운 회색 (계약서 개정 2026-11-16 situations) */
+function setBackground() {
+  scene.background = new THREE.Color(sc.outdoor ? 0xa7b6c4 : 0x2a2d31);
+}
 let sc = makeScenario();
 let ctx = motionCtx(spec, sc.elements);
 let staticGroup = buildStatic(sc);
 scene.add(staticGroup);
+setBackground(); // 첫 시나리오는 buildWorld를 거치지 않는다 (저장된 상황이 야외일 수 있다)
 /** 시나리오를 다시 만든다 (옵션·차량이 바뀔 때). 이동 판정(ctx)도 매번 새 요소로 다시 만든다. */
 function buildWorld() {
   sc = makeScenario();
@@ -106,6 +115,7 @@ function buildWorld() {
   disposeObject(staticGroup);
   staticGroup = buildStatic(sc);
   scene.add(staticGroup);
+  setBackground();
   ctx = motionCtx(spec, sc.elements);
 }
 
@@ -204,12 +214,18 @@ const recorder = new Recorder();
  * null = 아직 기록하지 않은 시도. 점수 창 (계약서 §5.1): 시도마다 첫 성공·충돌만 기록하고, 그 뒤의 P는 점수 없는 v2 카드.
  */
 let scoredCard: (() => void) | null = null;
+/**
+ * 이 시도에서 장애물(solid)에 가장 가까이 간 거리 (m, clearance, 최대 1 m). 골목·유턴의 gap 점수 (계약서 개정 2026-11-16 situations).
+ * 실제로 움직인 스텝 뒤에만 잰다: 움직이지 않고 구역에 든 시도(순간이동)는 null이라 gap 0점.
+ */
+let minGap: number | null = null;
 
-/** 새 시도: 사건 집계, 리플레이 기록, 점수 창을 비운다 */
+/** 새 시도: 사건 집계, 리플레이 기록, 점수 창, 가장 가까운 거리를 비운다 */
 function newAttempt() {
   tracker.reset();
   recorder.reset();
   scoredCard = null;
+  minGap = null;
 }
 
 const HINT: Record<ScenarioKind, Key> = {
@@ -217,10 +233,35 @@ const HINT: Record<ScenarioKind, Key> = {
   frontPerp: 'hintFrontPerp',
   parallel: 'hintParallel',
   ramp: 'hintRamp',
+  rearPerpOut: 'hintRearPerpOut',
+  frontPerpOut: 'hintFrontPerpOut',
+  parallelOut: 'hintParallelOut',
+  alley: 'hintAlley',
+  uturn: 'hintUturn',
+  kiosk: 'hintKiosk',
 };
-/** 설정 시트가 열린 동안 다시 시작했으면 시트를 닫을 때 안내를 띄운다 (시트에 반쯤 가렸다) */
+/** 성공 카드 제목 (계약서 개정 2026-11-16 situations): 주차 3종은 '주차 완료', 나머지는 상황마다 */
+const TITLE: Record<ScenarioKind, Key> = {
+  rearPerp: 'parked',
+  frontPerp: 'parked',
+  parallel: 'parked',
+  ramp: 'rampDone',
+  rearPerpOut: 'pullOutDone',
+  frontPerpOut: 'pullOutDone',
+  parallelOut: 'pullOutDone',
+  alley: 'alleyDone',
+  uturn: 'uturnDone',
+  kiosk: 'kioskDone',
+};
+/** 설정·상황 선택 시트가 열린 동안 다시 시작했으면 시트를 닫을 때 안내를 띄운다 (시트에 반쯤 가렸다) */
 let hintOnClose = false;
 const showHint = () => toast(t(HINT[sc.kind]), HINT_MS);
+/** 시트를 닫은 뒤: 미룬 안내를 띄운다. 다른 시트가 아직 열려 있으면 그 시트를 닫을 때 */
+function hintAfterSheet() {
+  if (!hintOnClose || panel.isOpen || situations.isOpen) return;
+  hintOnClose = false;
+  showHint();
+}
 
 function restart() {
   leaveReplay(); // 리플레이 중이면 운전 모드로: 다시 만든 차·시나리오가 옛 기록을 재생하지 않게
@@ -231,7 +272,7 @@ function restart() {
   newAttempt();
   hideOverlay();
   driver.look('F');
-  if (panel.isOpen) hintOnClose = true;
+  if (panel.isOpen || situations.isOpen) hintOnClose = true;
   else showHint();
 }
 
@@ -327,7 +368,14 @@ const partKey: Record<Collision['part'], Key> = {
   mirrorLeft: 'crashMirrorLeft',
   mirrorRight: 'crashMirrorRight',
 };
-const tagKey: Record<string, Key> = { wall: 'tagWall', pillar: 'tagPillar', car: 'tagCar' };
+const tagKey: Record<SolidTag, Key> = {
+  wall: 'tagWall',
+  pillar: 'tagPillar',
+  car: 'tagCar',
+  pole: 'tagPole',
+  kiosk: 'tagKiosk',
+  barrier: 'tagBarrier',
+};
 
 // ---- 기록 (계약서 §5.2): 조건마다 최고 기록과 최근 10개, localStorage ----
 /** localStorage는 접근만 해도 예외가 날 수 있다 (Safari 쿠키 차단 등) */
@@ -412,14 +460,24 @@ function marginsHtml(ev: GoalEval): string {
 }
 
 /**
- * 이 시도의 첫 성공 (칸에서 P, 출구 도착): 리플레이를 마무리하고, 점수를 매겨 기록하고, 점수 카드를 띄운다 (계약서 §5.4).
+ * 이 시도의 첫 성공 (칸에서 P, 출구 도착, 발권기 앞 P): 리플레이를 마무리하고, 점수를 매겨 기록하고, 점수 카드를 띄운다 (계약서 §5.4).
  * 칸 카드는 v2 정보(좌우 여유·미러 여유·각도 오차·소요 시간)를 그대로 두고 그 아래에 항목별 점수 (계약 개정 2026-11-15).
+ * 문 여유와 v2 표는 주차 3종(bay 계열)만. 발권기는 kioskEval 결과를 ev와 k로 받아 reach·along을 점수에 넘긴다 (계약서 개정 2026-11-16 situations).
  */
-function concludeSuccess(ev: GoalEval) {
+function concludeSuccess(ev: GoalEval, k?: KioskEval) {
   const e = tracker.events;
   recorder.finish(e.elapsed, state);
-  const slot = sc.goal.kind === 'slot';
-  const res = scoreAttempt({ kind: sc.kind, ev, doors: slot ? doorClearances(spec, state, sc.elements) : null, events: e });
+  const bay = FAMILY[sc.kind] === 'bay';
+  const title = TITLE[sc.kind];
+  const res = scoreAttempt({
+    kind: sc.kind,
+    ev,
+    doors: bay ? doorClearances(spec, state, sc.elements) : null,
+    events: e,
+    par: sc.scorePar,
+    minGap,
+    kiosk: k ? { reach: k.reach, along: k.along } : undefined,
+  });
   const newBest = recordAttempt({
     at: Date.now(),
     outcome: 'success',
@@ -431,9 +489,7 @@ function concludeSuccess(ev: GoalEval) {
   });
   // 글자는 카드를 띄울 때마다 만든다 (리플레이 중에 언어를 바꾸고 닫아도 카드가 새 언어로)
   const html = () =>
-    `<h2 class="good">${t(slot ? 'parked' : 'rampDone')}</h2>${scoreTotalHtml(res.total, newBest)}${
-      slot ? marginsHtml(ev) : ''
-    }${scoreRowsHtml(res.items)}`;
+    `<h2 class="good">${t(title)}</h2>${scoreTotalHtml(res.total, newBest)}${bay ? marginsHtml(ev) : ''}${scoreRowsHtml(res.items)}`;
   scoredCard = () => showOverlay(html(), restart, { dismissable: true, actions: replayActions() });
   scoredCard();
 }
@@ -472,9 +528,41 @@ function checkParked() {
   }
 }
 
+/** 발권기 실패 이유는 창문이 발권기 중심에서 앞뒤로 이 거리(m) 안일 때만 알린다 (|along|) */
+const KIOSK_HINT_RANGE = 8;
+
+/**
+ * 발권기: P로 바꿀 때 운전석 창문 기준으로 판정한다 (kioskJudge.ts, 계약서 개정 2026-11-16 situations).
+ * 실패하면 앞뒤(창문 ↔ 발권기 중심 |along|) → 거리(reach) → 각도 순으로 첫 이유를 알린다.
+ */
+function checkKiosk(k: NonNullable<Scenario['kiosk']>) {
+  const ev = kioskEval(sc.goal, fp, spec, state, k);
+  if (ev.success) {
+    tracker.finish(); // 첫 성공에서 시도를 끝낸다 (checkParked와 같음)
+    // 점수 창 밖(이미 기록한 시도)의 P는 점수 없는 짧은 카드
+    if (scoredCard) showOverlay(`<h2 class="good">${t('kioskDone')}</h2>`, restart, { dismissable: true });
+    else concludeSuccess(ev, ev);
+    return;
+  }
+  const along = Math.abs(ev.along);
+  if (along > KIOSK_HINT_RANGE) return;
+  // 허용치를 넘은 값은 허용치보다 크게 보인다 (반올림하면 30.4 cm가 '30 cm > 30 cm', 10.04°가 '10.0° > 10°'로 읽힌다)
+  const over = (v: number, max: number) => `${Math.max(Math.round(v * 100), Math.round(max * 100) + 1)} ${t('cm')}`;
+  if (along > KIOSK_ALONG_MAX) toast(`${t(ev.along > 0 ? 'kioskAhead' : 'kioskBehind')} · ${over(along, KIOSK_ALONG_MAX)}`);
+  else if (ev.reach > KIOSK_REACH_MAX)
+    toast(`${t('kioskFar')} · ${over(ev.reach, KIOSK_REACH_MAX)} > ${Math.round(KIOSK_REACH_MAX * 100)} ${t('cm')}`);
+  else toast(`${t('angleErr')} ${Math.max(ev.angleErrDeg, KIOSK_ANGLE_MAX + 0.1).toFixed(1)}° > ${KIOSK_ANGLE_MAX}°`);
+}
+
+/** P로 바꿀 때의 칸 판정: 발권기는 운전석 창문 기준, 주차 칸은 차 전체 */
+function checkSlot() {
+  if (sc.kiosk) checkKiosk(sc.kiosk);
+  else checkParked();
+}
+
 function requestGear(g: Gear) {
-  // 시뮬레이션이 멈춘 동안(결과 카드·리플레이·설정·기록 시트)에는 운전 입력을 받지 않는다
-  // (카드 중 P가 checkParked를 다시 부르지 않게, 시트 아래에 카드가 뜨지 않게)
+  // 시뮬레이션이 멈춘 동안(결과 카드·리플레이·설정·기록·상황 선택 시트)에는 운전 입력을 받지 않는다
+  // (카드 중 P가 checkSlot을 다시 부르지 않게, 시트 아래에 카드가 뜨지 않게)
   if (crashed || simPaused() || g === state.gear) return;
   if (!canShift(state)) {
     toast(t('shiftStop'));
@@ -483,7 +571,7 @@ function requestGear(g: Gear) {
   state.gear = g;
   if (g === 'P') {
     state.speed = 0;
-    if (sc.goal.kind === 'slot') checkParked();
+    if (sc.goal.kind === 'slot') checkSlot();
   }
 }
 
@@ -525,18 +613,20 @@ const panel = new SettingsPanel(
     }
     if (kind === 'aids') applyAids();
     if (kind === 'driver') applyDriver();
-    if (kind === 'world') {
-      buildWorld();
-      restart();
-    }
     if (kind === 'vehicle') applyVehicle(getSpec(settings.vehicle, settings.customDims));
     if (kind === 'ghost') applyGhost();
   },
+  hintAfterSheet,
+);
+// 상황 선택 시트 (계약서 개정 2026-11-16 situations): 상황·옵션을 바꾸면 저장 → 시나리오 다시 만들기 → 다시 시작 (시트는 열어 둔다)
+const situations = new SituationPanel(
+  settings,
   () => {
-    if (!hintOnClose) return;
-    hintOnClose = false;
-    showHint();
+    saveSettings(settings);
+    buildWorld();
+    restart();
   },
+  hintAfterSheet,
 );
 document.getElementById('btn-restart')!.addEventListener('click', (e) => {
   restart();
@@ -584,11 +674,11 @@ function setMode(m: Mode) {
 }
 
 /**
- * 시뮬레이션을 멈추는 동안: 리플레이, 결과 카드, 설정·기록 시트. step을 건너뛰고 기어 입력도 받지 않는다.
+ * 시뮬레이션을 멈추는 동안: 리플레이, 결과 카드, 설정·기록·상황 선택 시트. step을 건너뛰고 기어 입력도 받지 않는다.
  * 시트가 열린 동안 차가 움직이고(굴러가던 차, 눌린 가속 페달) 시간이 흐르면, 기록을 보거나 설정을 바꾸는 사이에 충돌·감점이 생길 수 있다.
  */
 function simPaused(): boolean {
-  return mode !== 'drive' || overlayOpen() || panel.isOpen || records.isOpen;
+  return mode !== 'drive' || overlayOpen() || panel.isOpen || records.isOpen || situations.isOpen;
 }
 
 /** 추적 카메라를 지금 재생 위치로 바로 옮긴다 (시작, 탐색, 추적 카메라로 바꿀 때) */
@@ -757,6 +847,8 @@ function step(dt: number) {
   state.heading = to.heading;
   state.speed = speed;
   tracker.step(dt, speed, r);
+  // 골목·유턴: 움직인 뒤의 자세에서 장애물까지 여유를 잰다 (gap 점수)
+  if (sc.kind === 'alley' || sc.kind === 'uturn') minGap = Math.min(minGap ?? Infinity, clearance(fp, state, sc.elements));
 }
 
 applyDriver();
@@ -847,11 +939,11 @@ function frameLoop(now: number) {
     renderer.setViewport(0, 0, w, h);
     if (chaseView) {
       chase.update(view, dt, w / h);
-      // 천장 조명 상자는 천장보다 높은 추적 카메라에서 허공에 뜬 흰 막대로 보이므로 이 화면에서만 숨긴다
-      const lamps = staticGroup.getObjectByName(CHASE_HIDDEN);
-      if (lamps) lamps.visible = false;
+      // 천장 조명 상자와 천장은 이 화면에서만 숨긴다 (scene.ts CHASE_HIDDEN): 조명 상자는 천장보다 높은 추적 카메라에서
+      // 허공에 뜬 흰 막대로 보이고, 천장은 눈이 그 아래로 내려오면(발권기) 갑자기 나타난다. 이름 붙은 메시가 여럿이라 모두 숨긴다
+      for (const o of staticGroup.children) if (o.name === CHASE_HIDDEN) o.visible = false;
       renderer.render(scene, chase.camera);
-      if (lamps) lamps.visible = true;
+      for (const o of staticGroup.children) if (o.name === CHASE_HIDDEN) o.visible = true;
     } else {
       renderer.render(scene, driver.camera);
       lastDrawCalls = renderer.info.render.calls; // render()마다 초기화되므로 운전석 화면 직후에 읽는다
@@ -913,12 +1005,13 @@ const sim = {
     settings.scenario = kind;
     if (opts.slotWidth !== undefined) settings.perp.slotWidth = opts.slotWidth;
     if (opts.target !== undefined) settings.perp.target = opts.target;
+    if (opts.crooked !== undefined) settings.perp.crooked = opts.crooked;
     if (opts.slotLength !== undefined) settings.parallel.slotLength = opts.slotLength;
     if (opts.innerRadius !== undefined) settings.ramp.innerRadius = opts.innerRadius;
     commitSettings();
     buildWorld();
     restart();
-    panel.render();
+    situations.render();
   },
   /** custom은 유효할 때만 settings.customDims에 들어간다 (설정 패널의 적용과 같음). */
   setVehicle(id: string, custom?: CustomDims) {
@@ -952,8 +1045,12 @@ const sim = {
     state.speed = 0;
     state.gear = 'N';
   },
-  /** 차체 중심을 목표 사각형 중심에, 방향 = rect.angle. 스크린샷 전용 (타이어가 휠스톱에 걸칠 수 있다). */
+  /**
+   * 차체 중심을 목표 사각형 중심에, 방향 = rect.angle. 스크린샷 전용 (타이어가 휠스톱에 걸칠 수 있다).
+   * 발권기는 증명 자세 G (kioskTargetPose: 창문이 발권기 정면, 성공하는 자세, 계약서 개정 2026-11-16 situations).
+   */
   goalPose(): Pose {
+    if (sc.kiosk) return kioskTargetPose(spec, sc);
     const r = sc.goal.rect;
     const bc = (spec.wheelbase + spec.frontOverhang - spec.rearOverhang) / 2; // 뒤축 → 차체 중심
     return { x: r.cx - bc * Math.cos(r.angle), y: r.cy - bc * Math.sin(r.angle), heading: r.angle };
@@ -962,7 +1059,8 @@ const sim = {
   look: (l: LookTarget) => driver.look(l),
   /** 운전 중 탑뷰가 지금 보이는지 (읽기 전용, 계약서 개정 2026-11-16 top-view) */
   topView: () => topViewShown(),
-  evaluate: (): GoalEval => evaluateGoal(sc.goal, fp, state),
+  /** 지금 자세의 목표 판정. 발권기는 운전석 창문 기준 (kioskEval: reach·along도 들어 있다) */
+  evaluate: (): GoalEval => (sc.kiosk ? kioskEval(sc.goal, fp, spec, state, sc.kiosk) : evaluateGoal(sc.goal, fp, state)),
   /** 마지막 운전석 화면의 드로우콜 수 */
   drawCalls: () => lastDrawCalls,
   /** GPU 자원 수 (차량 전환 뒤 해제 확인용, 계약서 §9 v2 게이트 5) */

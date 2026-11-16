@@ -13,9 +13,15 @@ const DT = 1 / 60;
  * - endMoving = true: 구역 목표는 움직이는 채로 성공하므로 가속 키를 끝까지 누르고, 지난 거리가 L에 이른 스텝에서 끝난다.
  *   (아래처럼 떼고 서면 L 바로 앞에서 서서 L에 이르지 못할 수 있다.)
  * - endMoving = false: 남은 거리가 HOLD 제동 거리 v²/(2·HOLD_DECEL) 이하가 되면 가속 키를 떼고, 속도가 0이 된 스텝에서 끝난다.
- *   스텝 단위로 떼고 스텝 적분의 제동 거리가 v²/(2·HOLD_DECEL)와 조금 달라 L에서 약 1 cm 안(앞 또는 뒤)에서 서지만, 시간 차이는 한 스텝 안팎이다.
+ *   스텝 단위로 떼고 스텝 적분의 제동 거리가 v²/(2·HOLD_DECEL)와 조금 달라 정확히 L이 아니라 L − 1.2 cm ~ L + 3.7 cm에서 선다
+ *   (가장 많이 지나치는 곳은 다 가속하기 전에 떼는 1 m 안팎의 짧은 구간, tests/timing.test.ts가 이 범위를 고정한다).
  */
 export function legTime(L: number, endMoving: boolean): number {
+  return legRun(L, endMoving).t;
+}
+
+/** legTime과 같은 1D 복제의 끝 상태: 걸린 시간 t (초), 지난 거리 x (m), 끝 속도 v (m/s) */
+export function legRun(L: number, endMoving: boolean): { t: number; x: number; v: number } {
   const s: VehicleState = { ...initialState(0, 0, 0), gear: 'D' };
   let throttle = 0;
   let brake = 0;
@@ -30,7 +36,7 @@ export function legTime(L: number, endMoving: boolean): number {
     x += s.speed * DT;
     if (s.speed > 0) started = true;
     if (started) t += DT;
-    if (endMoving ? x >= L : released && s.speed === 0) return t;
+    if (endMoving ? x >= L : released && s.speed === 0) return { t, x, v: s.speed };
   }
   throw new Error(`legTime: ${L} m 구간이 끝나지 않음`);
 }

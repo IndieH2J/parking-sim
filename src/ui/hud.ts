@@ -170,7 +170,7 @@ window.addEventListener(
   'keydown',
   (e) => {
     if (!cardKeys || e.repeat || !overlayOpen()) return;
-    if (document.querySelector('#settings-panel.show, #records-panel.show')) return;
+    if (document.querySelector('#settings-panel.show, #records-panel.show, #situation-panel.show')) return;
     if (e.key === 'Escape' && cardKeys.close) {
       e.preventDefault();
       cardKeys.close();
@@ -192,6 +192,9 @@ const SCORE_LABEL: Record<ScoreKey, Key> = {
   moves: 'scoreMoves',
   time: 'scoreTime',
   curb: 'scoreCurb',
+  gap: 'scoreGap',
+  reach: 'scoreReach',
+  align: 'scoreAlign',
 };
 
 /** 횟수: 한국어 '2회', 영어는 단위 없이 '2' (라벨이 Curb touches·Direction changes라 그대로 읽힌다) */

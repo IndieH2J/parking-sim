@@ -30,8 +30,9 @@ export interface Settings {
    */
   autoShift: boolean;
   scenario: ScenarioKind;
-  /** 후면·전면 직각이 함께 쓴다 */
-  perp: { slotWidth: number; target: TargetKind };
+  /** 후면·전면 직각 주차와 출차가 함께 쓴다. crooked = 옆 차가 비뚤게 선 칸 (계약서 개정 2026-11-16 situations) */
+  perp: { slotWidth: number; target: TargetKind; crooked: boolean };
+  /** 평행 주차와 출차가 함께 쓴다 */
   parallel: { slotLength: number };
   ramp: { innerRadius: number };
   /** DEFAULT_VEHICLE_ID, 프리셋 id 또는 'custom' */
@@ -55,7 +56,7 @@ export const DEFAULT_SETTINGS: Settings = {
   mirrorTiltReverse: false,
   autoShift: true,
   scenario: 'rearPerp',
-  perp: { slotWidth: 2.5, target: 'between' },
+  perp: { slotWidth: 2.5, target: 'between', crooked: false },
   parallel: { slotLength: 6.0 },
   ramp: { innerRadius: 6 },
   vehicle: DEFAULT_VEHICLE_ID,
@@ -108,6 +109,7 @@ export function sanitizeSettings(raw: unknown): Settings {
     perp: {
       slotWidth: clampNum(perp.slotWidth, d.perp.slotWidth, PERP_SLOT_RANGE.min, PERP_SLOT_RANGE.max),
       target: oneOf(perp.target, TARGETS, d.perp.target),
+      crooked: bool(perp.crooked, d.perp.crooked),
     },
     parallel: {
       slotLength: clampNum(obj(r.parallel).slotLength, d.parallel.slotLength, PARALLEL_LENGTH_RANGE.min, PARALLEL_LENGTH_RANGE.max),
@@ -177,10 +179,21 @@ export function optionsFor(s: Settings): { kind: ScenarioKind; opts: AnyScenario
   switch (s.scenario) {
     case 'rearPerp':
     case 'frontPerp':
-      return { kind: s.scenario, opts: { slotWidth: s.perp.slotWidth, target: s.perp.target } };
+    case 'rearPerpOut':
+    case 'frontPerpOut':
+      // crooked는 켰을 때만 넣는다: 꺼져 있으면 옵션 객체가 예전과 같다 (키 순서까지)
+      return {
+        kind: s.scenario,
+        opts: { slotWidth: s.perp.slotWidth, target: s.perp.target, ...(s.perp.crooked ? { crooked: true } : {}) },
+      };
     case 'parallel':
-      return { kind: 'parallel', opts: { slotLength: s.parallel.slotLength } };
+    case 'parallelOut':
+      return { kind: s.scenario, opts: { slotLength: s.parallel.slotLength } };
     case 'ramp':
       return { kind: 'ramp', opts: { innerRadius: s.ramp.innerRadius } };
+    case 'alley':
+    case 'uturn':
+    case 'kiosk':
+      return { kind: s.scenario, opts: {} };
   }
 }

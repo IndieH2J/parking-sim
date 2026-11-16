@@ -1,25 +1,10 @@
 import type { Settings } from './settings';
 import { getLang, t, type Key, type Lang } from './i18n';
-import type { ScenarioKind, TargetKind } from '../scenarios/types';
-import {
-  PARALLEL_LENGTH_PRESETS,
-  PARALLEL_LENGTH_RANGE,
-  PERP_SLOT_PRESETS,
-  PERP_SLOT_RANGE,
-  RAMP_RADIUS_OPTIONS,
-  SCENARIO_KINDS,
-} from '../scenarios/types';
 import type { CustomDims, GhostAlign } from '../sim/vehicles';
 import { CUSTOM_ID, CUSTOM_LIMITS, getSpec, listVehicles, validateCustomDims } from '../sim/vehicles';
 
-export type ChangeKind = 'aids' | 'driver' | 'world' | 'lang' | 'vehicle' | 'ghost' | 'controls';
-
-export const SC_LABEL: Record<ScenarioKind, Key> = {
-  rearPerp: 'scRearPerp',
-  frontPerp: 'scFrontPerp',
-  parallel: 'scParallel',
-  ramp: 'scRamp',
-};
+// 주차장(상황) 선택과 그 옵션은 상황 선택 시트로 옮겼다 (situationPanel.ts, 계약서 개정 2026-11-16 situations)
+export type ChangeKind = 'aids' | 'driver' | 'lang' | 'vehicle' | 'ghost' | 'controls';
 
 /** 추정값 필드 이름 → 표시 이름 (계약서 §6) */
 const DIM_LABEL: Record<string, Key> = {
@@ -52,7 +37,6 @@ const CUSTOM_FIELDS: { f: keyof CustomDims; label: Key; unit: 'mm' | 'm' }[] = [
 ];
 
 const on = (b: boolean) => (b ? 'on' : '');
-const clamp = (v: number, r: { min: number; max: number }) => Math.max(r.min, Math.min(r.max, v));
 
 /** 설정 패널을 그리고 변경을 콜백으로 알린다. 언어가 바뀌면 다시 그린다. */
 export class SettingsPanel {
@@ -131,14 +115,6 @@ export class SettingsPanel {
           ${chk('mirror-tilt', s.mirrorTiltReverse, t('mirrorTilt'))}
           <p class="note">${t('mirrorTiltNote')}</p>
         </section>
-        <section><h3>${t('lot')}</h3>
-          <div class="field"><span>${t('scenario')}</span>
-            <div class="seg">
-              ${SCENARIO_KINDS.map((k) => `<button data-scenario="${k}" class="${on(s.scenario === k)}">${t(SC_LABEL[k])}</button>`).join('')}
-            </div>
-          </div>
-          ${this.scenarioOptions()}
-        </section>
         <section><h3>${t('vehicle')}</h3>
           <select id="veh-select">${vehOptions(s.vehicle)}</select>
           <p class="note">${this.vehicleInfo()}</p>
@@ -164,60 +140,6 @@ export class SettingsPanel {
       </div>`;
     this.el.querySelector('.sheet')!.scrollTop = scrollTop;
     this.bind();
-  }
-
-  /** 지금 고른 주차 유형의 옵션 */
-  private scenarioOptions(): string {
-    const s = this.s;
-    switch (s.scenario) {
-      case 'rearPerp':
-      case 'frontPerp': {
-        const w = s.perp.slotWidth;
-        const preset = PERP_SLOT_PRESETS.includes(w);
-        const r = PERP_SLOT_RANGE;
-        return `
-          <div class="field"><span>${t('slotWidth')}</span>
-            <div class="seg">
-              ${PERP_SLOT_PRESETS.map((p) => `<button data-slot="${p}" class="${on(w === p)}">${p.toFixed(1)} m</button>`).join('')}
-              <button data-slot="custom" class="${on(!preset)}">${t('slotCustom')}</button>
-            </div>
-            <input type="number" id="slot-custom" inputmode="decimal" min="${r.min}" max="${r.max}" step="${r.step}" value="${w}" ${preset ? 'hidden' : ''}>
-            <small id="slot-custom-unit" class="unit" ${preset ? 'hidden' : ''}>m (${r.min}–${r.max})</small>
-          </div>
-          <div class="field"><span>${t('target')}</span>
-            <div class="seg">
-              <button data-target="between" class="${on(s.perp.target === 'between')}">${t('targetBetween')}</button>
-              <button data-target="pillar" class="${on(s.perp.target === 'pillar')}">${t('targetPillar')}</button>
-            </div>
-          </div>`;
-      }
-      case 'parallel': {
-        const len = s.parallel.slotLength;
-        const preset = PARALLEL_LENGTH_PRESETS.includes(len);
-        const r = PARALLEL_LENGTH_RANGE;
-        return `
-          <div class="field"><span>${t('slotLength')}</span>
-            <div class="seg">
-              ${PARALLEL_LENGTH_PRESETS.map(
-                (p) => `<button data-len="${p}" class="${on(len === p)}">${p.toFixed(1)} m${p === 6 ? ` (${t('lawStd')})` : ''}</button>`,
-              ).join('')}
-              <button data-len="custom" class="${on(!preset)}">${t('slotCustom')}</button>
-            </div>
-            <input type="number" id="len-custom" inputmode="decimal" min="${r.min}" max="${r.max}" step="${r.step}" value="${len}" ${preset ? 'hidden' : ''}>
-            <small id="len-custom-unit" class="unit" ${preset ? 'hidden' : ''}>m (${r.min}–${r.max})</small>
-          </div>`;
-      }
-      case 'ramp':
-        return `
-          <div class="field"><span>${t('rampRadius')}</span>
-            <div class="seg">
-              ${RAMP_RADIUS_OPTIONS.map(
-                (r) => `<button data-radius="${r}" class="${on(s.ramp.innerRadius === r)}">${r === 6 ? t('rampR6') : r === 5 ? t('rampR5') : `${r} m`}</button>`,
-              ).join('')}
-            </div>
-          </div>
-          <p class="note">${t('rampNote')}</p>`;
-    }
   }
 
   /** 전장 × 전폭 mm · 미러 mm · 회전 직경 m (+ 추정값 포함: 항목) */
@@ -299,75 +221,6 @@ export class SettingsPanel {
       s.mirrorTiltReverse = (e.target as HTMLInputElement).checked;
       this.onChange('driver'); // 저장. 조준은 main.ts 프레임 루프가 바로 다음 프레임에 바꾼다 (다시 시작 없음)
     };
-
-    // ---- 주차장 ----
-    const world = () => {
-      this.onChange('world');
-      this.render();
-    };
-    all<HTMLButtonElement>('[data-scenario]').forEach((b) => {
-      b.onclick = () => {
-        const k = b.dataset.scenario as ScenarioKind;
-        if (k === s.scenario) return;
-        s.scenario = k;
-        world();
-      };
-    });
-    // 숫자 직접 입력: 버튼을 누르면 입력칸을 보이고, 값이 바뀌면 범위로 잘라 적용한다.
-    const bindPresets = (
-      attr: string,
-      inputId: string,
-      set: (v: number) => void,
-      r: { min: number; max: number },
-      presets: readonly number[],
-    ) => {
-      all<HTMLButtonElement>(`[data-${attr}]`).forEach((b) => {
-        b.onclick = () => {
-          const v = b.dataset[attr]!;
-          if (v === 'custom') {
-            const input = q<HTMLInputElement>(`#${inputId}`)!;
-            input.hidden = false;
-            q(`#${inputId}-unit`)!.hidden = false;
-            all(`[data-${attr}]`).forEach((x) => x.classList.toggle('on', x === b));
-            input.focus();
-            return;
-          }
-          set(Number(v));
-          world();
-        };
-      });
-      const input = q<HTMLInputElement>(`#${inputId}`);
-      if (input) {
-        input.onchange = () => {
-          const v = Number(input.value);
-          if (input.value.trim() === '' || !Number.isFinite(v)) return;
-          const cv = clamp(v, r);
-          set(cv);
-          // 실제로 적용한 값(범위로 자른 값)을 입력칸에 보이고, 프리셋과 같으면 그 버튼을 켠다.
-          // 여기서 시트를 다시 그리지 않는다: change는 다른 버튼을 누르는 순간(blur)에도 와서, 누르던 버튼이 바뀌어 버린다.
-          input.value = String(cv);
-          all<HTMLButtonElement>(`[data-${attr}]`).forEach((x) => {
-            const d = x.dataset[attr]!;
-            x.classList.toggle('on', d === 'custom' ? !presets.includes(cv) : Number(d) === cv);
-          });
-          this.onChange('world');
-        };
-      }
-    };
-    bindPresets('slot', 'slot-custom', (v) => (s.perp.slotWidth = v), PERP_SLOT_RANGE, PERP_SLOT_PRESETS);
-    bindPresets('len', 'len-custom', (v) => (s.parallel.slotLength = v), PARALLEL_LENGTH_RANGE, PARALLEL_LENGTH_PRESETS);
-    all<HTMLButtonElement>('[data-target]').forEach((b) => {
-      b.onclick = () => {
-        s.perp.target = b.dataset.target as TargetKind;
-        world();
-      };
-    });
-    all<HTMLButtonElement>('[data-radius]').forEach((b) => {
-      b.onclick = () => {
-        s.ramp.innerRadius = Number(b.dataset.radius);
-        world();
-      };
-    });
 
     // ---- 차량 ----
     const veh = q<HTMLSelectElement>('#veh-select')!;

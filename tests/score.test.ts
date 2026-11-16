@@ -5,8 +5,8 @@ import type { AttemptEvents } from '../src/sim/attempt';
 import type { Pose, Vec2 } from '../src/sim/geometry';
 import { aabbRect } from '../src/sim/geometry';
 import type { GoalEval } from '../src/sim/goal';
-import type { ScoreItem, ScoreKey, ScoreResult } from '../src/sim/score';
-import { doorClearances, lin, SCORE_PAR, scoreAttempt } from '../src/sim/score';
+import type { ScoreInput, ScoreItem, ScoreKey, ScoreResult } from '../src/sim/score';
+import { doorClearances, FAMILY, lin, SCORE_PAR, scoreAttempt } from '../src/sim/score';
 import { MODEL_Y_2025 } from '../src/sim/specs';
 import type { ElementKind, WorldElement } from '../src/sim/world';
 
@@ -32,13 +32,26 @@ function cleanEvents(o: Partial<AttemptEvents> = {}): AttemptEvents {
 interface Case {
   ev?: Partial<GoalEval>;
   events?: Partial<AttemptEvents>;
-  /** 생략하면 slot은 양쪽 1 m, ramp는 null (main.ts와 같은 방식) */
+  /** 생략하면 bay 계열(주차 3종)은 양쪽 1 m, 나머지는 null (문 여유는 bay 계열만 쓴다) */
   doors?: { left: number; right: number } | null;
+  /** 생략하면 1 m (gap 만점). null = 잴 수 없음 */
+  minGap?: number | null;
+  /** 생략하면 앞면까지 0.15 m, 창문이 정면 (reach·align 만점) */
+  kiosk?: ScoreInput['kiosk'];
+  par?: ScoreInput['par'];
 }
 
 function score(kind: ScenarioKind, c: Case = {}): ScoreResult {
-  const doors = c.doors === undefined ? (kind === 'ramp' ? null : { left: 1, right: 1 }) : c.doors;
-  return scoreAttempt({ kind, ev: goodEval(c.ev), doors, events: cleanEvents(c.events) });
+  const doors = c.doors === undefined ? (FAMILY[kind] === 'bay' ? { left: 1, right: 1 } : null) : c.doors;
+  return scoreAttempt({
+    kind,
+    ev: goodEval(c.ev),
+    doors,
+    events: cleanEvents(c.events),
+    minGap: c.minGap === undefined ? 1 : c.minGap,
+    kiosk: c.kiosk ?? { reach: 0.15, along: 0 },
+    par: c.par,
+  });
 }
 
 function get(r: ScoreResult, key: ScoreKey): ScoreItem {
@@ -68,12 +81,18 @@ describe('lin', () => {
 });
 
 describe('SCORE_PAR', () => {
-  it('계약서 §5.1 표 (frontPerp moves 1·parallel moves 2는 2026-11-15 개정, 램프 80·200은 2026-11-16 개정)', () => {
+  it('계약서 §5.1 표 (frontPerp moves 1·parallel moves 2는 2026-11-15 개정, 램프 80·200은 2026-11-16 개정, 상황 6종은 증명 주행으로 정한 값: 설계 C6)', () => {
     expect(SCORE_PAR).toEqual({
       rearPerp: { moves: 1, tGood: 35, tBad: 120 },
       frontPerp: { moves: 1, tGood: 30, tBad: 120 },
       parallel: { moves: 2, tGood: 40, tBad: 150 },
       ramp: { moves: 0, tGood: 80, tBad: 200 },
+      rearPerpOut: { moves: 0, tGood: 20, tBad: 140 },
+      frontPerpOut: { moves: 1, tGood: 35, tBad: 155 },
+      parallelOut: { moves: 3, tGood: 30, tBad: 150 },
+      alley: { moves: 0, tGood: 75, tBad: 195 },
+      uturn: { moves: 2, tGood: 35, tBad: 155 },
+      kiosk: { moves: 0, tGood: 25, tBad: 145 },
     });
   });
 
@@ -247,6 +266,131 @@ describe('scoreAttempt: 램프 (zone)', () => {
     expect(pts(e({ elapsed: 140 }), 'time')).toBe(15);
     expect(pts(e({ elapsed: 200 }), 'time')).toBe(0);
     expect(e({ curbTouches: 4, dirChanges: 3, elapsed: 200 }).total).toBe(0);
+  });
+});
+
+describe('scoreAttempt: 상황 6종 (계약서 개정 2026-11-16 situations)', () => {
+  const TABLE: [ScenarioKind, ScoreKey[], number[]][] = [
+    ['rearPerpOut', ['moves', 'time'], [60, 40]],
+    ['frontPerpOut', ['moves', 'time'], [60, 40]],
+    ['parallelOut', ['curb', 'moves', 'time'], [20, 50, 30]],
+    ['alley', ['gap', 'moves', 'time'], [50, 20, 30]],
+    ['uturn', ['moves', 'gap', 'time'], [40, 30, 30]],
+    ['kiosk', ['reach', 'align', 'angle', 'moves', 'time', 'curb'], [30, 20, 10, 10, 15, 15]],
+  ];
+
+  it.each(TABLE)('%s: 완벽하면 100점, 항목과 만점이 표 순서대로', (kind, keys, maxes) => {
+    const r = score(kind);
+    expect(r.items.map((i) => i.key)).toEqual(keys);
+    expect(r.items.map((i) => i.max)).toEqual(maxes);
+    for (const i of r.items) expect(i.points).toBe(i.max);
+    expect(r.total).toBe(100);
+  });
+
+  it('FAMILY: 종류마다 계열 하나, 문 여유를 쓰는 bay는 주차 3종뿐', () => {
+    expect(FAMILY).toEqual({
+      rearPerp: 'bay',
+      frontPerp: 'bay',
+      parallel: 'bay',
+      ramp: 'ramp',
+      rearPerpOut: 'pullOut',
+      frontPerpOut: 'pullOut',
+      parallelOut: 'pullOut',
+      alley: 'alley',
+      uturn: 'uturn',
+      kiosk: 'kiosk',
+    });
+  });
+
+  it('bay가 아닌 계열은 doors를 보지 않는다 (문 여유 0이어도 문 항목이 없고 100점)', () => {
+    for (const kind of SCENARIO_KINDS.filter((k) => FAMILY[k] !== 'bay')) {
+      const r = score(kind, { doors: { left: 0, right: 0 } });
+      expect(r.items.some((i) => i.key === 'doorLeft' || i.key === 'doorRight')).toBe(false);
+      expect(r.total).toBe(100);
+    }
+  });
+
+  it('직각 출차: 기준(rearPerpOut 0, frontPerpOut 1)을 넘은 전환 3회에서 0점, 시간 rearPerpOut 20초·frontPerpOut 35초 만점, 각도·중앙은 보지 않음', () => {
+    expect(pts(score('rearPerpOut', { events: { dirChanges: 1 } }), 'moves')).toBe(40);
+    expect(pts(score('rearPerpOut', { events: { dirChanges: 3 } }), 'moves')).toBe(0);
+    expect(pts(score('frontPerpOut', { events: { dirChanges: 1 } }), 'moves')).toBe(60);
+    expect(pts(score('frontPerpOut', { events: { dirChanges: 2 } }), 'moves')).toBe(40);
+    expect(pts(score('rearPerpOut', { events: { elapsed: 20 } }), 'time')).toBe(40);
+    expect(pts(score('rearPerpOut', { events: { elapsed: 80 } }), 'time')).toBe(20);
+    expect(pts(score('rearPerpOut', { events: { elapsed: 140 } }), 'time')).toBe(0);
+    expect(pts(score('frontPerpOut', { events: { elapsed: 35 } }), 'time')).toBe(40);
+    expect(pts(score('frontPerpOut', { events: { elapsed: 95 } }), 'time')).toBe(20);
+    expect(pts(score('frontPerpOut', { events: { elapsed: 155 } }), 'time')).toBe(0);
+    expect(score('frontPerpOut', { ev: { angleErrDeg: 25, offset: { along: 1, across: 0.8 } } }).total).toBe(100);
+  });
+
+  it('평행 출차: 연석 1회 10점·2회 0점, 전환 기준 3회', () => {
+    expect(pts(score('parallelOut', { events: { curbTouches: 1 } }), 'curb')).toBe(10);
+    expect(pts(score('parallelOut', { events: { curbTouches: 2 } }), 'curb')).toBe(0);
+    expect(pts(score('parallelOut', { events: { dirChanges: 3 } }), 'moves')).toBe(50);
+    expect(pts(score('parallelOut', { events: { dirChanges: 4 } }), 'moves')).toBe(33.3);
+    expect(pts(score('parallelOut', { events: { dirChanges: 6 } }), 'moves')).toBe(0);
+  });
+
+  it('골목: gap 0.20 m 이상 만점·0.02 m 이하 0점 (value = minGap), 기준을 넘은 전환 2회에서 0점', () => {
+    const g = (minGap: number) => pts(score('alley', { minGap }), 'gap');
+    expect(g(0.2)).toBe(50);
+    expect(g(0.5)).toBe(50);
+    expect(g(0.11)).toBe(25);
+    expect(g(0.02)).toBe(0);
+    expect(g(0)).toBe(0);
+    expect(get(score('alley', { minGap: 0.11 }), 'gap').value).toBe(0.11);
+    expect(pts(score('alley', { events: { dirChanges: 1 } }), 'moves')).toBe(10);
+    expect(pts(score('alley', { events: { dirChanges: 2 } }), 'moves')).toBe(0);
+  });
+
+  it('유턴: 전환 기준 2회, 넘은 4회에서 0점, gap 30점', () => {
+    const m = (dirChanges: number) => pts(score('uturn', { events: { dirChanges } }), 'moves');
+    expect(m(2)).toBe(40);
+    expect(m(4)).toBe(20);
+    expect(m(6)).toBe(0);
+    expect(pts(score('uturn', { minGap: 0.11 }), 'gap')).toBe(15);
+  });
+
+  it('발권기: reach 0.20 m 만점·0.30 m 0점, align |along| 0.10 m 만점·0.40 m 0점, 각도 1° 만점·3° 0점', () => {
+    const k = (reach: number, along: number) => score('kiosk', { kiosk: { reach, along } });
+    expect(pts(k(0.2, 0), 'reach')).toBe(30);
+    expect(pts(k(0.25, 0), 'reach')).toBe(15);
+    expect(pts(k(0.3, 0), 'reach')).toBe(0);
+    expect(get(k(0.25, 0), 'reach').value).toBe(0.25);
+    expect(pts(k(0.15, -0.25), 'align')).toBe(10);
+    expect(get(k(0.15, -0.25), 'align').value).toBe(0.25);
+    expect(pts(k(0.15, 0.4), 'align')).toBe(0);
+    const a = (angleErrDeg: number) => pts(score('kiosk', { ev: { angleErrDeg } }), 'angle');
+    expect([a(1), a(2), a(3)]).toEqual([10, 5, 0]);
+    expect(pts(score('kiosk', { events: { dirChanges: 1 } }), 'moves')).toBe(5);
+    expect(pts(score('kiosk', { events: { elapsed: 85 } }), 'time')).toBe(7.5); // 25초 만점, 145초 0점의 가운데
+    expect(pts(score('kiosk', { events: { curbTouches: 1 } }), 'curb')).toBe(7.5);
+  });
+
+  it('잴 수 없는 값은 0점: minGap이 없거나 null이면 gap, kiosk가 없으면 reach·align (value null)', () => {
+    const base = { ev: goodEval(), doors: null, events: cleanEvents() };
+    for (const kind of ['alley', 'uturn'] as const) {
+      for (const minGap of [undefined, null]) {
+        const gap = get(scoreAttempt({ ...base, kind, minGap }), 'gap');
+        expect(gap).toEqual({ key: 'gap', points: 0, max: kind === 'alley' ? 50 : 30, value: null });
+      }
+    }
+    expect(scoreAttempt({ ...base, kind: 'alley' }).total).toBe(50);
+    const r = scoreAttempt({ ...base, kind: 'kiosk' });
+    expect(get(r, 'reach')).toEqual({ key: 'reach', points: 0, max: 30, value: null });
+    expect(get(r, 'align')).toEqual({ key: 'align', points: 0, max: 20, value: null });
+    expect(r.total).toBe(50);
+  });
+
+  it('par(sc.scorePar)가 전환 기준과 gap 만점 거리를 덮어쓴다 (없는 필드는 기본값)', () => {
+    expect(pts(score('uturn', { events: { dirChanges: 4 } }), 'moves')).toBe(20);
+    expect(pts(score('uturn', { events: { dirChanges: 4 }, par: { moves: 4 } }), 'moves')).toBe(40);
+    expect(pts(score('alley', { minGap: 0.11, par: { gapFull: 0.11 } }), 'gap')).toBe(50);
+    expect(pts(score('uturn', { minGap: 0.11, par: { gapFull: 0.11 } }), 'gap')).toBe(30);
+    expect(pts(score('alley', { minGap: 0.11, par: { moves: 0 } }), 'gap')).toBe(25);
+    expect(pts(score('alley', { events: { dirChanges: 1 }, par: { gapFull: 0.3 } }), 'moves')).toBe(10);
+    expect(pts(score('rearPerp', { events: { dirChanges: 3 }, par: { moves: 3 } }), 'moves')).toBe(15);
   });
 });
 

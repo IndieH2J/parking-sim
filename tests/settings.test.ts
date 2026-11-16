@@ -45,7 +45,7 @@ describe('설정 v2 기본값', () => {
       mirrorTiltReverse: false,
       autoShift: true,
       scenario: 'rearPerp',
-      perp: { slotWidth: 2.5, target: 'between' },
+      perp: { slotWidth: 2.5, target: 'between', crooked: false },
       parallel: { slotLength: 6.0 },
       ramp: { innerRadius: 6 },
       vehicle: DEFAULT_VEHICLE_ID,
@@ -74,7 +74,7 @@ describe('v1 → v2 이전', () => {
 
   it('migrateV1: perp로 옮기고 aids는 기본값에 병합', () => {
     const s = migrateV1(v1);
-    expect(s.perp).toEqual({ slotWidth: 2.3, target: 'pillar' });
+    expect(s.perp).toEqual({ slotWidth: 2.3, target: 'pillar', crooked: false });
     expect(s.lang).toBe('en');
     expect(s.aids).toEqual({ ...DEFAULT_SETTINGS.aids, minimap: false });
     expect(s.scenario).toBe('rearPerp');
@@ -87,7 +87,7 @@ describe('v1 → v2 이전', () => {
     st.setItem(SETTINGS_KEY_V1, raw);
     const s = loadSettings(st);
     expect(s).toMatchObject({ lang: 'en', driverHeightCm: 182, seatHeightCm: -2, seatForeCm: 5, fov: 70, calibMarks: true });
-    expect(s.perp).toEqual({ slotWidth: 2.3, target: 'pillar' });
+    expect(s.perp).toEqual({ slotWidth: 2.3, target: 'pillar', crooked: false });
     expect(st.getItem(SETTINGS_KEY_V1)).toBe(raw);
     expect(JSON.parse(st.getItem(SETTINGS_KEY)!)).toEqual(s);
     // 다음 로드는 v2 키를 읽는다
@@ -177,7 +177,7 @@ describe('저장·불러오기', () => {
     mirrorTiltReverse: true,
     autoShift: false,
     scenario: 'parallel',
-    perp: { slotWidth: 2.65, target: 'pillar' },
+    perp: { slotWidth: 2.65, target: 'pillar', crooked: true },
     parallel: { slotLength: 6.5 },
     ramp: { innerRadius: 5 },
     vehicle: 'custom',
@@ -264,6 +264,26 @@ describe('키보드 자동 변속 설정 autoShift (계약서 개정 2026-11-16 
   });
 });
 
+describe('옆 차 비뚤게 perp.crooked (계약서 개정 2026-11-16 situations)', () => {
+  it('기본값은 꺼짐, sanitize는 true를 유지하고 불리언이 아닌 값은 꺼짐', () => {
+    expect(DEFAULT_SETTINGS.perp.crooked).toBe(false);
+    expect(sanitizeSettings({ perp: { crooked: true } }).perp).toEqual({ slotWidth: 2.5, target: 'between', crooked: true });
+    expect(sanitizeSettings({ perp: { slotWidth: 2.3, crooked: false } }).perp.crooked).toBe(false);
+    for (const v of ['true', 1, null, {}, []]) expect(sanitizeSettings({ perp: { crooked: v } }).perp.crooked).toBe(false);
+  });
+
+  it('필드가 없는 v2 저장값(이 설정 전)은 꺼짐으로 읽고 다른 값은 그대로, 새 시나리오 종류도 읽는다', () => {
+    const st = new MemStorage();
+    st.setItem(SETTINGS_KEY, JSON.stringify({ ...DEFAULT_SETTINGS, perp: { slotWidth: 2.6, target: 'pillar' }, scenario: 'frontPerp' }));
+    const s = loadSettings(st);
+    expect(s.perp).toEqual({ slotWidth: 2.6, target: 'pillar', crooked: false });
+    expect(s.scenario).toBe('frontPerp');
+    for (const scenario of ['rearPerpOut', 'frontPerpOut', 'parallelOut', 'alley', 'uturn', 'kiosk'] as const) {
+      expect(sanitizeSettings({ scenario }).scenario).toBe(scenario);
+    }
+  });
+});
+
 describe('optionsFor', () => {
   it('설정의 시나리오 종류와 옵션', () => {
     const s = sanitizeSettings({ perp: { slotWidth: 2.3, target: 'pillar' }, parallel: { slotLength: 7 }, ramp: { innerRadius: 5 } });
@@ -271,5 +291,21 @@ describe('optionsFor', () => {
     expect(optionsFor({ ...s, scenario: 'frontPerp' })).toEqual({ kind: 'frontPerp', opts: { slotWidth: 2.3, target: 'pillar' } });
     expect(optionsFor({ ...s, scenario: 'parallel' })).toEqual({ kind: 'parallel', opts: { slotLength: 7 } });
     expect(optionsFor({ ...s, scenario: 'ramp' })).toEqual({ kind: 'ramp', opts: { innerRadius: 5 } });
+    expect(optionsFor({ ...s, scenario: 'rearPerpOut' })).toEqual({ kind: 'rearPerpOut', opts: { slotWidth: 2.3, target: 'pillar' } });
+    expect(optionsFor({ ...s, scenario: 'frontPerpOut' })).toEqual({ kind: 'frontPerpOut', opts: { slotWidth: 2.3, target: 'pillar' } });
+    expect(optionsFor({ ...s, scenario: 'parallelOut' })).toEqual({ kind: 'parallelOut', opts: { slotLength: 7 } });
+    for (const kind of ['alley', 'uturn', 'kiosk'] as const) expect(optionsFor({ ...s, scenario: kind })).toEqual({ kind, opts: {} });
+  });
+
+  it('crooked가 꺼져 있으면 직각 옵션 객체가 예전과 키 순서까지 같고, 켜면 crooked: true가 붙는다 (직각 주차·출차 4종)', () => {
+    const off = sanitizeSettings({ perp: { slotWidth: 2.3, target: 'pillar' } });
+    const on = sanitizeSettings({ perp: { slotWidth: 2.3, target: 'pillar', crooked: true } });
+    for (const kind of ['rearPerp', 'frontPerp', 'rearPerpOut', 'frontPerpOut'] as const) {
+      expect(JSON.stringify(optionsFor({ ...off, scenario: kind }).opts)).toBe('{"slotWidth":2.3,"target":"pillar"}');
+      expect(JSON.stringify(optionsFor({ ...on, scenario: kind }).opts)).toBe('{"slotWidth":2.3,"target":"pillar","crooked":true}');
+    }
+    // 평행 출차와 옵션 없는 코스는 crooked를 보지 않는다
+    expect(optionsFor({ ...on, scenario: 'parallelOut' }).opts).toEqual({ slotLength: 6 });
+    expect(optionsFor({ ...on, scenario: 'alley' }).opts).toEqual({});
   });
 });

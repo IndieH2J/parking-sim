@@ -23,12 +23,12 @@ export interface TopViewLayers {
   trail?: Vec2[] | null;
 }
 
-const FLOOR_TONE = { aisle: '#4a5650', walkway: '#5d6166' } as const;
+const FLOOR_TONE = { aisle: '#4a5650', walkway: '#5d6166', road: '#4b4f55' } as const;
 const hex = (c: number) => `#${c.toString(16).padStart(6, '0')}`;
 
 /**
  * 위에서 내려다본 2D 지도 (북쪽 +y가 위). ctx에는 이미 dpr 변환이 걸려 있다.
- * 순서: 배경, 바닥 구역, 목표, 요소(연석은 meta 색), 궤적(trail), 예상 경로, 고스트, 차.
+ * 순서: 배경, 바닥 구역, 목표, 연석, 벽 같은 solid (연석·solid는 meta 색이 있으면 그 색), 나머지 요소, 궤적(trail), 예상 경로, 고스트, 차.
  */
 export function drawTopView(ctx: CanvasRenderingContext2D, w: number, h: number, cam: TopViewCamera, layers: TopViewLayers): void {
   const { sc, car } = layers;
@@ -63,7 +63,7 @@ export function drawTopView(ctx: CanvasRenderingContext2D, w: number, h: number,
   };
   /**
    * 같은 색 다각형을 한 경로로 모아 한 번에 칠한다. 따로 칠하면 맞닿은 변에 안티앨리어싱 틈(가는 선)이 생긴다
-   * (램프의 5° 벽·연석·바닥 조각). 벽·연석은 다른 요소와 겹치지 않으므로 먼저 칠해도 그림은 같다.
+   * (램프의 5° 벽·연석·바닥 조각). 벽·연석은 선·차·기둥과 겹치지 않으므로 먼저 칠해도 그림은 같다.
    */
   const fillByColour = (items: [string, Vec2[]][]) => {
     const groups = new Map<string, Vec2[][]>();
@@ -86,26 +86,26 @@ export function drawTopView(ctx: CanvasRenderingContext2D, w: number, h: number,
       ctx.fill();
     }
   };
-  const isWall = (el: Scenario['elements'][number]) => el.kind === 'solid' && el.tag !== 'car' && el.tag !== 'pillar';
-  const curbFill = (el: Scenario['elements'][number]) => {
+  // 벽 같은 solid: 벽·발권기·차단기 (주차 차량·기둥·전봇대는 아래에서 따로)
+  const isWall = (el: Scenario['elements'][number]) =>
+    el.kind === 'solid' && el.tag !== 'car' && el.tag !== 'pillar' && el.tag !== 'pole';
+  const metaFill = (el: Scenario['elements'][number], def: string) => {
     const c = el.meta?.color;
-    return typeof c === 'number' ? hex(c) : '#bfbfbf';
+    return typeof c === 'number' ? hex(c) : def;
   };
 
   ctx.fillStyle = '#3b3f44';
   ctx.fillRect(0, 0, w, h);
   fillByColour(sc.floor.map((f): [string, Vec2[]] => [FLOOR_TONE[f.tone], f.poly]));
   poly(rectCorners(sc.goal.rect), 'rgba(48,209,88,0.28)', null);
-  fillByColour(
-    sc.elements.flatMap((el): [string, Vec2[]][] =>
-      el.kind === 'curb' ? [[curbFill(el), el.poly]] : isWall(el) ? [['#8d9196', el.poly]] : [],
-    ),
-  );
+  // 연석을 먼저, solid를 그 위에 따로 칠한다: 발권기·차단기는 섬 연석 위에 서 있어 색 순서대로 칠하면 연석에 덮일 수 있다
+  fillByColour(sc.elements.flatMap((el): [string, Vec2[]][] => (el.kind === 'curb' ? [[metaFill(el, '#bfbfbf'), el.poly]] : [])));
+  fillByColour(sc.elements.flatMap((el): [string, Vec2[]][] => (isWall(el) ? [[metaFill(el, '#8d9196'), el.poly]] : [])));
   for (const el of sc.elements) {
     if (el.kind === 'line') poly(el.poly, '#e8e8e8', null);
     else if (el.kind === 'wheelStop') poly(el.poly, '#e0b400', null);
     else if (el.tag === 'car') poly(el.poly, '#6f7882', '#20242a');
-    else if (el.tag === 'pillar') poly(el.poly, '#d8b020', '#20242a');
+    else if (el.tag === 'pillar' || el.tag === 'pole') poly(el.poly, '#d8b020', '#20242a');
   }
   if (layers.trail && layers.trail.length > 1) polyline(layers.trail, '#64d2ff', 2);
   if (layers.path) for (const side of [layers.path.left, layers.path.right]) polyline(side, '#ffd60a', 1.5);

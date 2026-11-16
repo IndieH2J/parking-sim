@@ -4,14 +4,47 @@ import type { Goal } from '../sim/goal';
 
 // 시나리오 공통 타입과 옵션 메타데이터 (계약서 §1.1).
 
-export type ScenarioKind = 'rearPerp' | 'frontPerp' | 'parallel' | 'ramp';
-export const SCENARIO_KINDS: readonly ScenarioKind[] = ['rearPerp', 'frontPerp', 'parallel', 'ramp'];
+// 출차 3종·골목·유턴·발권기 6종은 계약서 개정 2026-11-16 situations (설계 .dev/v4-design.md C0).
+export type ScenarioKind =
+  | 'rearPerp'
+  | 'frontPerp'
+  | 'parallel'
+  | 'ramp'
+  | 'rearPerpOut'
+  | 'frontPerpOut'
+  | 'parallelOut'
+  | 'alley'
+  | 'uturn'
+  | 'kiosk';
+/** 예전 4종이 먼저 (설정 정리·테스트 순서) */
+export const SCENARIO_KINDS: readonly ScenarioKind[] = [
+  'rearPerp',
+  'frontPerp',
+  'parallel',
+  'ramp',
+  'rearPerpOut',
+  'frontPerpOut',
+  'parallelOut',
+  'alley',
+  'uturn',
+  'kiosk',
+];
 export type TargetKind = 'between' | 'pillar';
 
-/** rearPerp, frontPerp */
+/** 상황 선택 시트의 묶음: 주차하기 / 출차하기 / 주행 연습 */
+export type SituationGroup = 'park' | 'pullOut' | 'drive';
+export const SITUATION_GROUPS: readonly { group: SituationGroup; kinds: readonly ScenarioKind[] }[] = [
+  { group: 'park', kinds: ['rearPerp', 'frontPerp', 'parallel'] },
+  { group: 'pullOut', kinds: ['rearPerpOut', 'frontPerpOut', 'parallelOut'] },
+  { group: 'drive', kinds: ['ramp', 'alley', 'uturn', 'kiosk'] },
+];
+
+/** rearPerp, frontPerp, rearPerpOut, frontPerpOut */
 export interface PerpOptions {
   slotWidth: number;
   target: TargetKind;
+  /** 옆 차가 비뚤게 선 칸 (crooked.ts). 없으면 꺼짐 */
+  crooked?: boolean;
   seed?: number;
 }
 export interface ParallelOptions {
@@ -22,11 +55,19 @@ export interface ParallelOptions {
 export interface RampOptions {
   innerRadius: number;
 }
+/** alley, uturn, kiosk: 옵션 없음 (구성이 하나뿐, 크기는 차에 맞춘다) */
+export type NoOptions = Record<string, never>;
 export interface ScenarioOptionsMap {
   rearPerp: PerpOptions;
   frontPerp: PerpOptions;
   parallel: ParallelOptions;
   ramp: RampOptions;
+  rearPerpOut: PerpOptions;
+  frontPerpOut: PerpOptions;
+  parallelOut: ParallelOptions;
+  alley: NoOptions;
+  uturn: NoOptions;
+  kiosk: NoOptions;
 }
 export type AnyScenarioOptions = ScenarioOptionsMap[ScenarioKind];
 
@@ -42,7 +83,7 @@ export const RAMP_RADIUS_OPTIONS: readonly number[] = [6, 5];
 /** 시각 표현 전용, 볼록. h = 윗면 높이 (기본 0.001). */
 export interface FloorPatch {
   poly: Vec2[];
-  tone: 'aisle' | 'walkway';
+  tone: 'aisle' | 'walkway' | 'road';
   h?: number;
 }
 
@@ -60,4 +101,10 @@ export interface Scenario {
   floor: FloorPatch[];
   /** 천장 조명 중심. 긴 축이 heading 방향 */
   lamps: Pose[];
+  /** 야외 (하늘 배경, 천장·조명 없음). 없으면 실내 */
+  outdoor?: boolean;
+  /** 점수 기준 덮어쓰기: 전환 기준 횟수와 gap 항목 만점 거리 (score.ts ScoreInput.par로 넘긴다) */
+  scorePar?: { moves?: number; gapFull?: number };
+  /** 발권기 (kioskJudge.ts): x = 기계 중심 x, faceY = 차로 쪽 기계 앞면 y */
+  kiosk?: { x: number; faceY: number };
 }

@@ -87,6 +87,24 @@ describe('recordKey', () => {
     expect(recordKey('rearPerp', { slotWidth: 2.5 - 1e-12, target: 'between', seed: 3 }, 'model-y-2025')).toBe(KEY);
     expect(recordKey('parallel', { slotLength: 5.8 + 0.1 * 3 }, 'm')).toBe('parallel|L6.10|m');
   });
+
+  it('상황 6종과 옆 차 비뚤게 (계약서 개정 2026-11-16 situations): crooked가 꺼져 있으면 예전 키 그대로', () => {
+    expect(recordKey('rearPerp', { slotWidth: 2.5, target: 'between', crooked: false }, 'model-y-2025')).toBe(KEY);
+    expect(recordKey('frontPerp', { slotWidth: 2.3, target: 'pillar', crooked: false }, 'sonata')).toBe('frontPerp|w2.30|pillar|sonata');
+    expect(recordKey('rearPerp', { slotWidth: 2.5, target: 'between', crooked: true }, 'model-y-2025')).toBe(
+      'rearPerp|w2.50|between|crooked|model-y-2025',
+    );
+    expect(recordKey('frontPerp', { slotWidth: 2.6, target: 'pillar', crooked: true }, 'k5')).toBe('frontPerp|w2.60|pillar|crooked|k5');
+    expect(recordKey('rearPerpOut', { slotWidth: 2.3, target: 'pillar' }, 'sonata')).toBe('rearPerpOut|w2.30|pillar|sonata');
+    expect(recordKey('frontPerpOut', { slotWidth: 2.5, target: 'between', crooked: true }, 'k5')).toBe(
+      'frontPerpOut|w2.50|between|crooked|k5',
+    );
+    expect(recordKey('parallelOut', { slotLength: 6.5 }, 'avante')).toBe('parallelOut|L6.50|avante');
+    const custom = 'custom:6000x2200x2600x2000x3800x1300x1900x1500';
+    expect(recordKey('alley', {}, 'model-y-2025')).toBe('alley|model-y-2025');
+    expect(recordKey('uturn', {}, custom)).toBe(`uturn|${custom}`);
+    expect(recordKey('kiosk', {}, 'morning')).toBe('kiosk|morning');
+  });
 });
 
 describe('addAttempt', () => {

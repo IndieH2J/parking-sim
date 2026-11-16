@@ -8,12 +8,17 @@ import { buildRearPerpendicular } from '../src/scenarios/rearPerpendicular';
 import { buildFrontPerpendicular } from '../src/scenarios/frontPerpendicular';
 import { buildParallel } from '../src/scenarios/parallel';
 import { buildNarrowRamp } from '../src/scenarios/narrowRamp';
+import { buildFrontPerpOut, buildParallelOut, buildRearPerpOut } from '../src/scenarios/pullOut';
+import { buildAlley } from '../src/scenarios/alley';
+import { buildUturn } from '../src/scenarios/uturn';
+import { buildKiosk } from '../src/scenarios/kiosk';
 import {
   PARALLEL_LENGTH_PRESETS,
   PARALLEL_LENGTH_RANGE,
   PERP_SLOT_PRESETS,
   PERP_SLOT_RANGE,
   RAMP_RADIUS_OPTIONS,
+  type PerpOptions,
   type Scenario,
   type TargetKind,
 } from '../src/scenarios/types';
@@ -53,6 +58,30 @@ const perpWidths = [D.perp.slotWidth, Math.max(...PERP_SLOT_PRESETS), PERP_SLOT_
 const parallelLengths = [D.parallel.slotLength, Math.max(...PARALLEL_LENGTH_PRESETS), PARALLEL_LENGTH_RANGE.max];
 const targets: TargetKind[] = ['between', 'pillar'];
 
+// 상황 6종 (계약서 개정 2026-11-16 situations, 설계 .dev/v4-design.md D 게이트): 모델 Y와 직접 입력 최대급 차.
+// 출차는 기본 옵션과 가장 어려운 옵션 (가장 좁은 폭 = 프리셋 최소와 직접 입력 최소, 기둥 옆, 비뚤게 / 가장 짧은 칸), 코스 3종은 구성 하나
+const SITUATION_CARS: [string, VehicleSpec][] = [
+  ['model-y-2025', MODEL_Y_2025],
+  ['OVERSIZED', OVERSIZED],
+];
+const perpOutOptions: PerpOptions[] = [
+  { slotWidth: D.perp.slotWidth, target: D.perp.target },
+  ...[Math.min(...PERP_SLOT_PRESETS), PERP_SLOT_RANGE.min].map((slotWidth) => ({ slotWidth, target: 'pillar' as const, crooked: true })),
+];
+const perpLabel = (o: PerpOptions) => `${o.slotWidth} m ${o.target}${o.crooked ? ' crooked' : ''}`;
+/** 기본 칸 길이(6.0)가 가장 짧은 프리셋과 같아 겹치는 값은 한 번만 */
+const parallelOutLengths = [...new Set([D.parallel.slotLength, Math.min(...PARALLEL_LENGTH_PRESETS), PARALLEL_LENGTH_RANGE.min])];
+const SITUATION_CASES: Case[] = SITUATION_CARS.flatMap(([car, spec]) => [
+  ...perpOutOptions.flatMap((o) => [
+    { name: `rearPerpOut ${perpLabel(o)} ${car}`, sc: buildRearPerpOut(o, spec), spec },
+    { name: `frontPerpOut ${perpLabel(o)} ${car}`, sc: buildFrontPerpOut(o, spec), spec },
+  ]),
+  ...parallelOutLengths.map((slotLength) => ({ name: `parallelOut ${slotLength} m ${car}`, sc: buildParallelOut({ slotLength }, spec), spec })),
+  { name: `alley ${car}`, sc: buildAlley(spec), spec },
+  { name: `uturn ${car}`, sc: buildUturn(spec), spec },
+  { name: `kiosk ${car}`, sc: buildKiosk(spec), spec },
+]);
+
 const CASES: Case[] = [
   ...perpWidths.flatMap((slotWidth) =>
     targets.flatMap((target) => [
@@ -68,6 +97,7 @@ const CASES: Case[] = [
       spec,
     })),
   ),
+  ...SITUATION_CASES,
 ];
 
 /** 차(차체·미러)의 월드 꼭짓점 */
@@ -142,6 +172,20 @@ describe('fitLot: 운전 중 탑뷰 맞춤 (계약서 개정 2026-11-16 top-view
       const fp = buildFootprint(c.spec);
       const { w, h, inset } = SIZES[2];
       expect(fitLot(c.sc, { fp, pose: c.sc.start }, w, h, inset)).toEqual(fitLot(c.sc, null, w, h, inset));
+    }
+  });
+
+  it('상황 6종: 출발한 차(차체·미러)가 바닥·요소의 범위 안에 있다', () => {
+    for (const c of SITUATION_CASES) {
+      const lot = [...c.sc.floor.flatMap((f) => f.poly), ...c.sc.elements.flatMap((el) => el.poly)];
+      const xs = lot.map((p) => p.x);
+      const ys = lot.map((p) => p.y);
+      for (const p of carVerts(c.spec, c.sc.start)) {
+        expect(p.x, c.name).toBeGreaterThanOrEqual(Math.min(...xs));
+        expect(p.x, c.name).toBeLessThanOrEqual(Math.max(...xs));
+        expect(p.y, c.name).toBeGreaterThanOrEqual(Math.min(...ys));
+        expect(p.y, c.name).toBeLessThanOrEqual(Math.max(...ys));
+      }
     }
   });
 });
