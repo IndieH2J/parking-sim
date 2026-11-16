@@ -23,9 +23,9 @@ const MAX_ACCEL = 2.5; // m/s²
 const MAX_BRAKE = 6.0; // m/s²
 const ROLL_DECEL = 0.25; // m/s²
 // 추정값. 테슬라의 'Hold' 정지 모드에 빗댄 것(가속 페달을 떼면 회생제동으로 멈추고 정지를 유지) — 실측값이 아니다.
-const HOLD_DECEL = 2.0; // m/s², 기어 D/R에서 가속 페달을 뗐을 때
-export const MAX_SPEED = 5 / 3.6; // 주차 속도 상한 (D8), 전진·후진 같음
-// MAX_SPEED가 2 m/s보다 낮아 지금은 변속 거부(canShift false)가 일어나지 않는다. 상한을 다시 올릴 때를 위해 일부러 남겨 둔다 (D8).
+export const HOLD_DECEL = 2.0; // m/s², 기어 D/R에서 가속 페달을 뗐을 때
+export const MAX_SPEED = 5 / 3.6; // 주차 속도 상한 (계약서 개정 2026-11-16 controls), 전진·후진 같음
+// MAX_SPEED가 2 m/s보다 낮아 지금은 변속 거부(canShift false)가 일어나지 않는다. 상한을 다시 올릴 때를 위해 일부러 남겨 둔다 (계약서 개정 2026-11-16 controls).
 const SHIFT_MAX_SPEED = 2.0; // 이 속도 이하에서만 변속 허용
 
 /**
@@ -51,6 +51,29 @@ export function initialState(x: number, y: number, heading: number): VehicleStat
 
 export function canShift(state: VehicleState): boolean {
   return Math.abs(state.speed) <= SHIFT_MAX_SPEED;
+}
+
+/** v를 target 쪽으로 rate·dt만큼 옮기되 넘기지 않는다 */
+const approach = (v: number, target: number, rate: number, dt: number) =>
+  v < target ? Math.min(target, v + rate * dt) : Math.max(target, v - rate * dt);
+
+/**
+ * 페달 값 한 스텝 (main.ts step()에서 옮김, 계약서 개정 2026-11-16 controls).
+ * - 가속: 누르는 동안 0.8/s로 1까지 오르고, 떼면 바로 정확히 0 (no-creep). 서서히 줄이면 뗀 뒤에도 잠깐 더 가속하고,
+ *   떼자마자 D·R로 바꾸면 남은 가속 값으로 키 없이 움직였다 (최대 약 5.5 cm).
+ * - 브레이크: 밟으면 3/s로 1까지, 떼면 6/s로 0까지.
+ */
+export function pedalStep(
+  throttle: number,
+  brake: number,
+  accelOn: boolean,
+  brakeOn: boolean,
+  dt: number,
+): { throttle: number; brake: number } {
+  return {
+    throttle: accelOn ? approach(throttle, 1, 0.8, dt) : 0,
+    brake: approach(brake, brakeOn ? 1 : 0, brakeOn ? 3 : 6, dt),
+  };
 }
 
 /** 종방향 속도 갱신 */

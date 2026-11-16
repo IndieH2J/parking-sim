@@ -1,7 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import { MODEL_Y_2025 as SPEC } from '../src/sim/specs';
 import { buildFootprint, wheelPolys } from '../src/sim/footprint';
-import { canShift, integratePose, initialState, MAX_SPEED, maxSteerAngle, updateSpeed, type VehicleState } from '../src/sim/vehicle';
+import {
+  canShift,
+  integratePose,
+  initialState,
+  MAX_SPEED,
+  maxSteerAngle,
+  pedalStep,
+  updateSpeed,
+  type VehicleState,
+} from '../src/sim/vehicle';
 import { type Pose, type Vec2, toWorld } from '../src/sim/geometry';
 import { findCollision, findWheelBlock, prepare, type WorldElement } from '../src/sim/world';
 import { readSensors } from '../src/sim/sensors';
@@ -146,7 +155,7 @@ describe('차량 운동', () => {
   });
 });
 
-describe('속도 상한 (D8)', () => {
+describe('속도 상한 (계약서 개정 2026-11-16 controls)', () => {
   it('MAX_SPEED = 5 km/h', () => {
     expect(MAX_SPEED).toBe(5 / 3.6);
   });
@@ -166,6 +175,61 @@ describe('속도 상한 (D8)', () => {
   it('상한 속도(±MAX_SPEED)에서도 변속할 수 있다 (상한 < 2 m/s라 canShift가 거부하지 않는다)', () => {
     expect(canShift({ ...initialState(0, 0, 0), gear: 'D', speed: MAX_SPEED })).toBe(true);
     expect(canShift({ ...initialState(0, 0, 0), gear: 'R', speed: -MAX_SPEED })).toBe(true);
+  });
+});
+
+describe('pedalStep: 페달 값 램프 (main.ts에서 옮김, 계약서 개정 2026-11-16 controls)', () => {
+  const dt = 1 / 60;
+
+  it('가속: 누르는 동안 스텝마다 0.8·dt씩 올라 정확히 1에서 멈추고, 떼면 어느 값에서든 바로 정확히 0', () => {
+    let th = 0;
+    const seq: number[] = [];
+    for (let i = 0; i < 90; i++) {
+      th = pedalStep(th, 0, true, false, dt).throttle;
+      seq.push(th);
+    }
+    // 0.8/s라 1까지 1.25초 = 75 스텝 (누적 오차로 한 스텝 어긋날 수 있다)
+    const full = seq.indexOf(1);
+    expect(full).toBeGreaterThanOrEqual(74);
+    expect(full).toBeLessThanOrEqual(75);
+    for (let i = 0; i < full; i++) expect(seq[i] - (i === 0 ? 0 : seq[i - 1]), `${i}`).toBeCloseTo(0.8 * dt, 12);
+    expect(seq.slice(full).every((v) => v === 1)).toBe(true);
+    for (const v of [1, 0.5, 0.8 * dt]) {
+      expect(pedalStep(v, 0, false, false, dt).throttle, `${v}`).toBe(0);
+      expect(pedalStep(v, 0, false, true, dt).throttle, `${v}`).toBe(0);
+    }
+  });
+
+  it('브레이크: 밟으면 스텝마다 3·dt씩 1까지, 떼면 6·dt씩 0까지 오가며 끝값에서 정확히 멈춘다', () => {
+    let b = 0;
+    const on: number[] = [];
+    for (let i = 0; i < 40; i++) {
+      b = pedalStep(0, b, false, true, dt).brake;
+      on.push(b);
+    }
+    const full = on.indexOf(1); // 1초에 3 → 20 스텝
+    expect(full).toBeGreaterThanOrEqual(19);
+    expect(full).toBeLessThanOrEqual(20);
+    for (let i = 0; i < full; i++) expect(on[i] - (i === 0 ? 0 : on[i - 1]), `${i}`).toBeCloseTo(3 * dt, 12);
+    expect(on.slice(full).every((v) => v === 1)).toBe(true);
+    const off: number[] = [];
+    for (let i = 0; i < 20; i++) {
+      b = pedalStep(0, b, false, false, dt).brake;
+      off.push(b);
+    }
+    const zero = off.indexOf(0); // 1초에 6 → 10 스텝
+    expect(zero).toBeGreaterThanOrEqual(9);
+    expect(zero).toBeLessThanOrEqual(10);
+    for (let i = 0; i < zero; i++) expect((i === 0 ? 1 : off[i - 1]) - off[i], `${i}`).toBeCloseTo(6 * dt, 12);
+    expect(off.slice(zero).every((v) => v === 0)).toBe(true);
+  });
+
+  it('가속과 브레이크는 따로 움직이고, 변화량은 dt에 비례하며 끝값(0, 1)을 넘지 않는다', () => {
+    expect(pedalStep(0.5, 0.5, true, true, dt)).toEqual({ throttle: 0.5 + 0.8 * dt, brake: 0.5 + 3 * dt });
+    expect(pedalStep(0.5, 0.5, true, false, dt)).toEqual({ throttle: 0.5 + 0.8 * dt, brake: 0.5 - 6 * dt });
+    expect(pedalStep(0.5, 0.5, false, true, dt)).toEqual({ throttle: 0, brake: 0.5 + 3 * dt });
+    expect(pedalStep(0.5, 0.5, true, false, 0.1)).toEqual({ throttle: 0.5 + 0.8 * 0.1, brake: 0 });
+    expect(pedalStep(0.95, 0.9, true, true, 0.1)).toEqual({ throttle: 1, brake: 1 });
   });
 });
 

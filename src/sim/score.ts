@@ -44,7 +44,7 @@ export const SCORE_PAR: Record<ScenarioKind, { moves: number; tGood: number; tBa
   frontPerp: { moves: 1, tGood: 30, tBad: 120 },
   // 2 = 기본 칸(6.0 m)에서 모델 Y의 전환 1회 이하 주차는 기하상 불가능 → 같은 규칙(찾은 최소, 최대 2). 근거: 계약서 Amendments 2026-11-15 v3-fix
   parallel: { moves: 2, tGood: 40, tBad: 150 },
-  // 80·200 (예전 60·180) = D8 속도 상한(5 km/h)에 맞춘 값: tGood ≥ 1.5 × 상한에서 걸리는 최소 시간 (가드: tests/narrowRamp.test.ts)
+  // 80·200 (예전 60·180) = 속도 상한(5 km/h, 계약서 개정 2026-11-16 controls)에 맞춘 값: tGood ≥ 1.5 × 상한에서 걸리는 최소 시간 (가드: tests/narrowRamp.test.ts)
   ramp: { moves: 0, tGood: 80, tBad: 200 },
 };
 

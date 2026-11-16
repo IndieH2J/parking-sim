@@ -24,6 +24,11 @@ export interface Settings {
   calibMarks: boolean;
   /** R에서 양쪽 사이드미러를 아래로 숙인다 (테슬라 Mirror Auto-Tilt 같은 기능). 기본 꺼짐, 이 필드가 없는 저장값도 꺼짐 */
   mirrorTiltReverse: boolean;
+  /**
+   * 키보드 자동 변속 (계약서 개정 2026-11-16 controls): W·↑ 전진, S·↓ 후진, Space 브레이크. 기본 켬, 이 필드가 없는 저장값도 켬.
+   * 끄면 예전 방식 (W·↑ 지금 기어로 가속, S·↓·Space 브레이크). 터치 조작에는 영향이 없다.
+   */
+  autoShift: boolean;
   scenario: ScenarioKind;
   /** 후면·전면 직각이 함께 쓴다 */
   perp: { slotWidth: number; target: TargetKind };
@@ -48,6 +53,7 @@ export const DEFAULT_SETTINGS: Settings = {
   fov: 60,
   calibMarks: false,
   mirrorTiltReverse: false,
+  autoShift: true,
   scenario: 'rearPerp',
   perp: { slotWidth: 2.5, target: 'between' },
   parallel: { slotLength: 6.0 },
@@ -97,6 +103,7 @@ export function sanitizeSettings(raw: unknown): Settings {
     fov: clampNum(r.fov, d.fov, 45, 75),
     calibMarks: bool(r.calibMarks, d.calibMarks),
     mirrorTiltReverse: bool(r.mirrorTiltReverse, d.mirrorTiltReverse),
+    autoShift: bool(r.autoShift, d.autoShift),
     scenario: oneOf(r.scenario, SCENARIO_KINDS, d.scenario),
     perp: {
       slotWidth: clampNum(perp.slotWidth, d.perp.slotWidth, PERP_SLOT_RANGE.min, PERP_SLOT_RANGE.max),

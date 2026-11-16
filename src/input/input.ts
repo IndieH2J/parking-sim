@@ -1,4 +1,5 @@
 import type { Gear } from '../sim/vehicle';
+import type { DriveKeys } from '../sim/autoShift';
 import type { LookTarget } from '../render/cameras';
 
 export interface InputCallbacks {
@@ -13,14 +14,25 @@ export interface InputCallbacks {
   maxWheel: number;
 }
 
-const KEY_GEAR: Record<string, Gear> = { KeyP: 'P', KeyR: 'R', KeyN: 'N', KeyF: 'D' };
-const KEY_LOOK: Record<string, LookTarget> = {
-  Digit1: 'LM',
-  Digit2: 'LW',
-  Digit3: 'F',
-  Digit4: 'RW',
-  Digit5: 'RM',
-  Digit6: 'BACK',
+/** 기어 키 (계약서 개정 2026-11-16 controls): 1 P · 2 R · 3 N · 4 D. 예전 글자 키 P·R·N·F(=D)는 별칭으로 남긴다 */
+export const KEY_GEAR: Readonly<Record<string, Gear>> = {
+  Digit1: 'P',
+  Digit2: 'R',
+  Digit3: 'N',
+  Digit4: 'D',
+  KeyP: 'P',
+  KeyR: 'R',
+  KeyN: 'N',
+  KeyF: 'D',
+};
+/** 시선 키: 5 좌미러 · 6 좌창 · 7 정면 · 8 우창 · 9 우미러 · 0 뒤 */
+export const KEY_LOOK: Readonly<Record<string, LookTarget>> = {
+  Digit5: 'LM',
+  Digit6: 'LW',
+  Digit7: 'F',
+  Digit8: 'RW',
+  Digit9: 'RM',
+  Digit0: 'BACK',
 };
 
 /** 키보드·터치·마우스 입력을 모아 페달/조향 의도로 바꾼다. */
@@ -153,12 +165,30 @@ export class Input {
     view.addEventListener('pointercancel', end);
   }
 
+  /** 수동 모드(키보드 자동 변속 끔)의 가속: 터치 가속 페달·↑·W */
   get accel(): boolean {
     return this.touchAccel || this.keys.has('ArrowUp') || this.keys.has('KeyW');
   }
 
+  /** 수동 모드의 브레이크: 터치 브레이크 페달·↓·S·Space */
   get brake(): boolean {
     return this.touchBrake || this.keys.has('ArrowDown') || this.keys.has('KeyS') || this.keys.has('Space');
+  }
+
+  /** 자동 변속 모드의 키보드 운전 키 (계약서 개정 2026-11-16 controls). 터치 페달은 pedalAccel·pedalBrake로 따로 본다 */
+  get keyIntent(): DriveKeys {
+    const k = this.keys;
+    return { fwd: k.has('KeyW') || k.has('ArrowUp'), rev: k.has('KeyS') || k.has('ArrowDown'), brake: k.has('Space') };
+  }
+
+  /** 터치 가속 페달만 */
+  get pedalAccel(): boolean {
+    return this.touchAccel;
+  }
+
+  /** 터치 브레이크 페달만 */
+  get pedalBrake(): boolean {
+    return this.touchBrake;
   }
 
   /** 키보드 조향 방향 (+1 왼쪽, -1 오른쪽, 0 유지) */

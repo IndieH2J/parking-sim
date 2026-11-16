@@ -525,9 +525,9 @@ describe('해결 가능성: 출발에서 출구 구역까지 전진만 (§8.2)',
   }
 });
 
-// ---------------------------------------------------------------- 시간 기준 (D8 속도 상한 5 km/h)
+// ---------------------------------------------------------------- 시간 기준 (속도 상한 5 km/h, 계약서 개정 2026-11-16 controls)
 
-describe('시간 기준: 램프 tGood ≥ 1.5 × 상한 속도로 걸리는 최소 시간 (D8)', () => {
+describe('시간 기준: 램프 tGood ≥ 1.5 × 상한 속도로 걸리는 최소 시간 (계약서 개정 2026-11-16 controls)', () => {
   // T = 해결 가능성 주행의 뒤축 경로 길이를 가속 키를 끝까지 누른 채 가는 시간 (출구 구역은 움직이는 채로 성공한다).
   // 속도 상한이나 램프 길이가 바뀌어 실패하면 SCORE_PAR.ramp를 다시 맞춘다.
   const cars: [string, VehicleSpec][] = [
@@ -541,8 +541,7 @@ describe('시간 기준: 램프 tGood ≥ 1.5 × 상한 속도로 걸리는 최�
         expect(run.success, run.error).toBe(true);
         const L = run.d.segments.reduce((s, x) => s + Math.abs(x.dist), 0);
         const T = legTime(L, true);
-        console.log(`[ramp-time] ${spec.id} R${Ri}: L ${L.toFixed(2)} m, T ${T.toFixed(2)} s, tGood/T ${(SCORE_PAR.ramp.tGood / T).toFixed(2)}`);
-        expect(SCORE_PAR.ramp.tGood).toBeGreaterThanOrEqual(1.5 * T);
+        expect(SCORE_PAR.ramp.tGood, `L ${L.toFixed(2)} m, T ${T.toFixed(2)} s`).toBeGreaterThanOrEqual(1.5 * T);
       });
     }
   }

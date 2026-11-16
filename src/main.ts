@@ -10,10 +10,12 @@ import {
   integratePose,
   maxSteerAngle,
   maxWheelAngle,
+  pedalStep,
   updateSpeed,
   type Gear,
   type VehicleState,
 } from './sim/vehicle';
+import { autoShift } from './sim/autoShift';
 import type { Collision } from './sim/world';
 import { readSensors } from './sim/sensors';
 import { eyeLocal } from './sim/driver';
@@ -515,6 +517,7 @@ const panel = new SettingsPanel(
   settings,
   (kind) => {
     saveSettings(settings);
+    // 'controls'(키보드 자동 변속)는 저장만 한다: step()이 settings.autoShift를 매 스텝 읽는다
     if (kind === 'lang') {
       setLang(settings.lang!);
       document.getElementById('toast')!.classList.remove('show'); // 떠 있는 토스트는 이전 언어 문장이라 숨긴다
@@ -654,9 +657,6 @@ function setTopView(on: boolean) {
   syncTopView();
 }
 
-const approach = (v: number, target: number, rate: number, dt: number) =>
-  v < target ? Math.min(target, v + rate * dt) : Math.max(target, v - rate * dt);
-
 /** 시뮬레이션 한 스텝 (계약서 §1.5 순서) */
 function step(dt: number) {
   // 0. 구역 목표: 정지·순간이동한 차도 잡도록 어떤 조기 반환보다 먼저
@@ -667,16 +667,34 @@ function step(dt: number) {
       state.gear = 'P';
       tracker.finish();
       concludeSuccess(ev); // 출구 도착 카드 (점수)
+      // 이 스텝은 여기서 끝낸다: W를 누른 채 도착하면 아래 자동 변속이 카드 밑에서 P를 D로 바꾸고,
+      // 수동 모드에서는 기어 안내가 카드 위에 떴다 (계약서 개정 2026-11-16 controls)
+      return;
     }
   }
 
   // 1. 페달과 조향. 바퀴를 연석·휠스톱 안으로 돌리는 조향은 거부한다.
-  // 가속 키를 떼면 가속 값은 바로 0 (no-creep): 서서히 줄이면 뗀 뒤에도 잠깐 더 가속하고,
-  // 떼자마자 D·R로 바꾸면 남은 가속 값으로 키 없이 움직였다 (최대 약 5.5 cm)
-  throttle = input.accel ? approach(throttle, 1, 0.8, dt) : 0;
-  brake = approach(brake, input.brake ? 1 : 0, input.brake ? 3 : 6, dt);
-  // 데스크톱: P·N인 채 가속 키를 누르면 기어 키를 알려 준다 (첫 화면에 조작 안내가 없고, 기어 버튼은 터치 기기에만 있다)
-  if (!coarse && input.accel && (state.gear === 'P' || state.gear === 'N')) {
+  // 키보드 자동 변속 (기본, 계약서 개정 2026-11-16 controls): W·↑ 전진, S·↓ 후진, Space 브레이크 (sim/autoShift.ts).
+  // 기어는 requestGear를 거치지 않고 바로 바꾼다 (P 판정·변속 거부·토스트 없음). 방향을 바꾸면 가속 값을 0부터 다시 올린다.
+  // 터치 페달은 두 모드 모두 지금 기어 그대로 가속·브레이크다. 페달 값의 램프(no-creep 포함)는 pedalStep.
+  let accelOn: boolean;
+  let brakeOn: boolean;
+  if (settings.autoShift) {
+    const cmd = autoShift(state.gear, state.speed, input.keyIntent);
+    if (cmd.gear !== state.gear && !crashed) {
+      state.gear = cmd.gear;
+      throttle = 0;
+    }
+    accelOn = cmd.throttle || input.pedalAccel;
+    brakeOn = cmd.brake || input.pedalBrake;
+  } else {
+    accelOn = input.accel;
+    brakeOn = input.brake;
+  }
+  ({ throttle, brake } = pedalStep(throttle, brake, accelOn, brakeOn, dt));
+  // 데스크톱 수동 모드: P·N인 채 가속 키를 누르면 기어 키를 알려 준다 (첫 화면에 조작 안내가 없고, 기어 버튼은 터치 기기에만 있다).
+  // 자동 변속 모드에서는 W·S가 알아서 P·N을 벗어나므로 띄우지 않는다.
+  if (!coarse && !settings.autoShift && input.accel && (state.gear === 'P' || state.gear === 'N')) {
     const now = performance.now();
     if (now - lastGearHint >= HINT_MS) {
       toast(t('gearHint'), HINT_MS);

@@ -12,7 +12,7 @@ import {
 import type { CustomDims, GhostAlign } from '../sim/vehicles';
 import { CUSTOM_ID, CUSTOM_LIMITS, getSpec, listVehicles, validateCustomDims } from '../sim/vehicles';
 
-export type ChangeKind = 'aids' | 'driver' | 'world' | 'lang' | 'vehicle' | 'ghost';
+export type ChangeKind = 'aids' | 'driver' | 'world' | 'lang' | 'vehicle' | 'ghost' | 'controls';
 
 export const SC_LABEL: Record<ScenarioKind, Key> = {
   rearPerp: 'scRearPerp',
@@ -157,7 +157,10 @@ export class SettingsPanel {
           </div>
           <p class="note">${t('ghostNote')}</p>
         </section>
-        <section><h3>${t('controls')}</h3><p class="note">${coarse ? t('touchHelp') : t('keysHelp')}</p></section>
+        <section><h3>${t('controls')}</h3>
+          ${coarse ? '' : chk('auto-shift', s.autoShift, t('autoShift'))}
+          <p class="note">${coarse ? t('touchHelp') : s.autoShift ? t('keysHelpAuto') : t('keysHelp')}</p>
+        </section>
       </div>`;
     this.el.querySelector('.sheet')!.scrollTop = scrollTop;
     this.bind();
@@ -418,5 +421,15 @@ export class SettingsPanel {
         this.render();
       };
     });
+
+    // ---- 조작법: 키보드 자동 변속 (계약서 개정 2026-11-16 controls). 체크박스는 데스크톱(포인터가 coarse가 아님)에만 있다 ----
+    const autoShift = q<HTMLInputElement>('#auto-shift');
+    if (autoShift) {
+      autoShift.onchange = () => {
+        s.autoShift = autoShift.checked;
+        this.onChange('controls');
+        this.render(); // 조작법 안내 문구를 모드에 맞춰 바꾼다
+      };
+    }
   }
 }

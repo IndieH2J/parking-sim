@@ -68,7 +68,7 @@ describe('lin', () => {
 });
 
 describe('SCORE_PAR', () => {
-  it('계약서 §5.1 표 (frontPerp moves 1·parallel moves 2는 2026-11-15 개정)', () => {
+  it('계약서 §5.1 표 (frontPerp moves 1·parallel moves 2는 2026-11-15 개정, 램프 80·200은 2026-11-16 개정)', () => {
     expect(SCORE_PAR).toEqual({
       rearPerp: { moves: 1, tGood: 35, tBad: 120 },
       frontPerp: { moves: 1, tGood: 30, tBad: 120 },

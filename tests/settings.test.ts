@@ -43,6 +43,7 @@ describe('설정 v2 기본값', () => {
       fov: 60,
       calibMarks: false,
       mirrorTiltReverse: false,
+      autoShift: true,
       scenario: 'rearPerp',
       perp: { slotWidth: 2.5, target: 'between' },
       parallel: { slotLength: 6.0 },
@@ -174,6 +175,7 @@ describe('저장·불러오기', () => {
     fov: 50,
     calibMarks: true,
     mirrorTiltReverse: true,
+    autoShift: false,
     scenario: 'parallel',
     perp: { slotWidth: 2.65, target: 'pillar' },
     parallel: { slotLength: 6.5 },
@@ -226,6 +228,39 @@ describe('후진 미러 하향 설정 mirrorTiltReverse (계약서 Amendments 20
     expect(s).toMatchObject({ lang: 'en', calibMarks: true, scenario: 'parallel' });
     // v1에서 옮긴 설정도 꺼짐
     expect(migrateV1({ slotWidth: 2.3 }).mirrorTiltReverse).toBe(false);
+  });
+});
+
+describe('키보드 자동 변속 설정 autoShift (계약서 개정 2026-11-16 controls)', () => {
+  it('기본값은 켬', () => {
+    expect(DEFAULT_SETTINGS.autoShift).toBe(true);
+    expect(sanitizeSettings(null).autoShift).toBe(true);
+  });
+
+  it('sanitize는 false를 유지하고, 불리언이 아닌 값은 켬', () => {
+    expect(sanitizeSettings({ autoShift: false }).autoShift).toBe(false);
+    expect(sanitizeSettings({ autoShift: true }).autoShift).toBe(true);
+    for (const v of ['false', 0, null, {}, [], 'off']) expect(sanitizeSettings({ autoShift: v }).autoShift).toBe(true);
+  });
+
+  it('필드가 없는 v2 저장값(이 설정 전)은 켬으로 읽고 다른 값은 그대로, false 저장값은 false로 읽는다', () => {
+    const st = new MemStorage();
+    const old: Record<string, unknown> = { ...DEFAULT_SETTINGS, lang: 'en', mirrorTiltReverse: true, scenario: 'ramp' };
+    delete old.autoShift;
+    st.setItem(SETTINGS_KEY, JSON.stringify(old));
+    const s = loadSettings(st);
+    expect(s.autoShift).toBe(true);
+    expect(s).toMatchObject({ lang: 'en', mirrorTiltReverse: true, scenario: 'ramp' });
+    st.setItem(SETTINGS_KEY, JSON.stringify({ ...DEFAULT_SETTINGS, autoShift: false }));
+    expect(loadSettings(st).autoShift).toBe(false);
+  });
+
+  it('v1에서 옮긴 설정은 켬 (저장 키는 그대로 v2)', () => {
+    expect(migrateV1({ slotWidth: 2.3 }).autoShift).toBe(true);
+    const st = new MemStorage();
+    st.setItem(SETTINGS_KEY_V1, '{"slotWidth":2.3,"lang":"en"}');
+    expect(loadSettings(st).autoShift).toBe(true);
+    expect(JSON.parse(st.getItem(SETTINGS_KEY)!).autoShift).toBe(true);
   });
 });
 
