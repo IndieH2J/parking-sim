@@ -16,6 +16,8 @@ export interface Footprint {
   mirrorRight: Part;
   /** 차체 외곽을 구역별 꺾은선으로 나눈 것 (거리 센서용) */
   zones: Record<BodyZone, Vec2[]>;
+  /** B필러 중심 x. 추정값. 3D 차 모델의 B필러와 탑뷰 표시가 이 값을 같이 쓴다. 충돌 판정에는 쓰지 않는다 */
+  bPillarX: number;
 }
 
 export type BodyZone =
@@ -30,6 +32,22 @@ export type BodyZone =
 
 /** 모서리를 깎은 정도(평면도에서 범퍼 모서리의 둥근 정도 근사) */
 const CORNER_CHAMFER = 0.15;
+
+/**
+ * 사이드미러 유리(mirror.xRear) → 카울(앞유리 하단) 최소 간격 (m). 추정값.
+ * 175 cm 눈에서 A필러가 미러 유리를 가리는 비율(격자 광선 검사): 이 규칙 전 모닝 좌 16%·우 35%, 캐스퍼 크기 38%·66%,
+ * 작은 직접 입력 최대 84%·96% → 0.25 m에서 모두 4% 이하. 모델 Y(0.32)·아반떼·K3·K5·쏘나타는 그대로.
+ */
+const MIRROR_TO_COWL = 0.25;
+
+/**
+ * 앞유리 하단(카울) x. 추정값. 3D 차 모델(render/carMesh.ts)의 보닛·앞유리·필러가 여기에 맞춰진다.
+ * 사이드미러 유리가 카울보다 MIRROR_TO_COWL 이상 뒤에 오게 한다: 짧은 차(모닝·소형 직접 입력)는
+ * 추정 미러 위치(눈 + 0.59 m)가 카울에 바짝 붙어, 뒤로 누운 A필러가 운전석에서 본 미러 유리를 가렸다. 모델 Y는 그대로(간격 0.32).
+ */
+export function cowlXOf(spec: VehicleSpec): number {
+  return Math.max(spec.wheelbase - 0.45, spec.mirror.xRear + MIRROR_TO_COWL);
+}
 
 export function bodyExtents(spec: VehicleSpec) {
   return {
@@ -105,6 +123,8 @@ export function buildFootprint(spec: VehicleSpec): Footprint {
     mirrorLeft: { poly: mirrorLeft, hMin: m.hBottom, hMax: m.hTop },
     mirrorRight: { poly: mirrorRight, hMin: m.hBottom, hMax: m.hTop },
     zones,
+    // 추정값: 카울 1.25 m 뒤. 모든 프리셋·직접 입력 범위에서 175 cm 운전자 눈보다 0.1~0.41 m 뒤(어깨 옆)다
+    bPillarX: cowlXOf(spec) - 1.25,
   };
 }
 

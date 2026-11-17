@@ -122,6 +122,19 @@ export function drawTopView(ctx: CanvasRenderingContext2D, w: number, h: number,
     poly(polyToWorld(fp.body.poly, pose), layers.ghost || layers.trail ? 'rgba(244,245,247,0.45)' : '#f4f5f7', '#0a84ff', 1.5);
     poly(polyToWorld(fp.mirrorLeft.poly, pose), '#0a84ff', null);
     poly(polyToWorld(fp.mirrorRight.poly, pose), '#0a84ff', null);
+    // B필러: 양쪽 차체 옆면을 가로지르는 보라색 짧은 선. 미러(파란 칸)와 헷갈리지 않게 색·모양을 달리한다.
+    // 실제 크기(폭 0.1 m)는 미니맵 축척(약 11 px/m)에서 1 px라 굵기 2 px, 안쪽 4 px 이상으로 그린다.
+    // 바깥은 미러가 튀어나온 만큼만: 더 길면 차체·미러가 칸 안에 있어도 선 끝이 칸 선에 닿아 차가 실제보다 넓어 보인다.
+    const hw = Math.max(...fp.body.poly.map((p) => p.y));
+    const mw = Math.max(...fp.mirrorLeft.poly.map((p) => p.y));
+    const inner = Math.max(0.35, 4 / s);
+    for (const side of [1, -1]) {
+      const tick = [
+        { x: fp.bPillarX, y: side * (hw - inner) },
+        { x: fp.bPillarX, y: side * mw },
+      ];
+      polyline(polyToWorld(tick, pose), '#bf5af2', Math.max(2, 0.1 * s));
+    }
     // 앞쪽 표시
     const [nx, ny] = toPx(polyToWorld([{ x: fp.zones.frontCenter[0].x - 0.5, y: 0 }], pose)[0]);
     ctx.fillStyle = '#0a84ff';

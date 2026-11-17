@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { VehicleSpec } from '../sim/specs';
-import { bodyExtents, buildFootprint } from '../sim/footprint';
+import { bodyExtents, buildFootprint, cowlXOf } from '../sim/footprint';
 import { eyeLocal } from '../sim/driver';
 import { aabbRect, rect, type Vec2 } from '../sim/geometry';
 import { beam, box, extrudePoly, extrudeProfile, L, mat, wallsOnly } from './util';
@@ -17,12 +17,6 @@ const TIRE = 0x121212;
 const RIM = 0x80858b;
 const LINING = 0x2b2d31; // 차체 외피 안쪽 면(실내에서 보이는 쪽)
 const GLASS = 0x3a424a; // 밖에서 본 옆 유리
-/**
- * 사이드미러 유리(mirror.xRear) → 카울(앞유리 하단) 최소 간격 (m). 추정값.
- * 175 cm 눈에서 A필러가 미러 유리를 가리는 비율(격자 광선 검사): 이 규칙 전 모닝 좌 16%·우 35%, 캐스퍼 크기 38%·66%,
- * 작은 직접 입력 최대 84%·96% → 0.25 m에서 모두 4% 이하. 모델 Y(0.32)·아반떼·K3·K5·쏘나타는 그대로.
- */
-const MIRROR_TO_COWL = 0.25;
 
 export interface CarRig {
   group: THREE.Group; // 차량 루트(뒤축 원점). position/rotation은 매 프레임 갱신
@@ -45,9 +39,8 @@ export function buildCar(spec: VehicleSpec): CarRig {
   // 하부 차체 윗면 = 보닛 밑면. 모델 Y는 0.8 m. 낮은 차(전고 약 1.61 m 미만)는 벨트라인 아래 0.2 m로 내린다:
   // 보닛 앞 끝(belt - 0.15)이 이 면보다 낮으면 보닛 단면이 꼬인다 (세단·모닝 프리셋, 직접 입력 전고 1.2 m).
   const lowerTop = Math.min(0.8, belt - 0.2);
-  // 앞유리 하단. 사이드미러 유리가 카울보다 MIRROR_TO_COWL 이상 뒤에 오게 한다: 짧은 차(모닝·소형 직접 입력)는
-  // 추정 미러 위치(눈 + 0.59 m)가 카울에 바짝 붙어, 뒤로 누운 A필러가 운전석에서 본 미러 유리를 가렸다. 모델 Y는 그대로(간격 0.32).
-  const cowlX = Math.max(spec.wheelbase - 0.45, spec.mirror.xRear + MIRROR_TO_COWL);
+  // 앞유리 하단 (미러 유리와의 간격 규칙은 sim/footprint.ts cowlXOf)
+  const cowlX = cowlXOf(spec);
   const roofFrontX = cowlX - 0.72;
   const roofRearX = xr + 0.45;
   const roofHw = hw - 0.2;
@@ -119,8 +112,10 @@ export function buildCar(spec: VehicleSpec): CarRig {
   // 기둥·지붕 (A, B, C 필러는 어두운 트림)
   for (const s of [1, -1]) {
     g.add(beam(L(cowlX - 0.03, s * (hw - 0.08), belt), L(roofFrontX, s * roofHw, H - 0.04), 0.09, trim, 0.06));
-    const bX = cowlX - 1.25;
-    g.add(beam(L(bX, s * (hw - 0.05), belt), L(bX, s * roofHw, H - 0.04), 0.1, trim, 0.06));
+    const bX = fp.bPillarX; // 탑뷰의 B필러 표시와 같은 값
+    const bPillar = beam(L(bX, s * (hw - 0.05), belt), L(bX, s * roofHw, H - 0.04), 0.1, trim, 0.06);
+    bPillar.name = 'bPillar'; // tests/bPillar.test.ts가 탑뷰 표시와 같은 x인지 확인한다
+    g.add(bPillar);
     g.add(beam(L(xr + 0.35, s * (hw - 0.05), belt), L(roofRearX + 0.05, s * roofHw, H - 0.05), 0.2, trim, 0.08));
   }
   g.add(box(roofRearX, roofFrontX, -roofHw, roofHw, H - 0.05, H, mat(0x1c1f23)));
