@@ -63,7 +63,9 @@ export class Input {
 
   private onKey(e: KeyboardEvent, down: boolean) {
     const tag = (e.target as HTMLElement)?.tagName;
-    if (tag === 'INPUT' || tag === 'SELECT') return;
+    // 입력칸에서 누른 키는 운전 입력이 아니지만(숫자를 치면 기어가 바뀌지 않게), 뗀 키는 늘 놓는다:
+    // W를 누른 채 시트의 입력칸을 누르고 떼면 W가 눌린 채로 남아 시트를 닫은 뒤 차가 계속 갔다
+    if (down && (tag === 'INPUT' || tag === 'SELECT')) return;
     if (down) {
       if (KEY_GEAR[e.code] && !e.repeat) this.cb.onGear(KEY_GEAR[e.code]);
       if (KEY_LOOK[e.code] && !e.repeat) this.cb.onLook(KEY_LOOK[e.code]);
